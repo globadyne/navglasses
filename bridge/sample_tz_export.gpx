@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Sample TimeZero export for TZ Bridge testing" xmlns="http://www.topografix.com/GPX/1/1">
+  <wpt lat="44.6010" lon="-63.5415">
+    <name>Fishing spot</name>
+    <sym>Fish</sym>
+    <desc>Good mackerel in August</desc>
+  </wpt>
+  <wpt lat="44.5905" lon="-63.5290">
+    <name>Lobster pots</name>
+    <sym>Caution</sym>
+    <desc>Line of pots, keep clear</desc>
+  </wpt>
+  <wpt lat="44.6120" lon="-63.5600">
+    <name>Anchorage</name>
+    <sym>Anchor</sym>
+  </wpt>
+  <wpt lat="44.5700" lon="-63.5520">
+    <name>Shoal</name>
+    <sym>Danger</sym>
+    <desc>2.1 m at low water</desc>
+  </wpt>
+  <rte>
+    <name>Harbour to Chebucto</name>
+    <rtept lat="44.6205" lon="-63.5560"><name>WP3</name></rtept>
+    <rtept lat="44.5587" lon="-63.5209"><name>WP4 Harbour mouth</name></rtept>
+    <rtept lat="44.5100" lon="-63.5300"><name>WP5 Outer mark</name></rtept>
+  </rte>
+  <trk>
+    <name>Saturday sail</name>
+    <trkseg>
+      <trkpt lat="44.6250" lon="-63.5650"/>
+      <trkpt lat="44.6180" lon="-63.5580"/>
+      <trkpt lat="44.6100" lon="-63.5500"/>
+      <trkpt lat="44.6010" lon="-63.5420"/>
+      <trkpt lat="44.5930" lon="-63.5380"/>
+      <trkpt lat="44.5850" lon="-63.5400"/>
+    </trkseg>
+  </trk>
+</gpx>

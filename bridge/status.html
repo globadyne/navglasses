@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TZ Bridge</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --text: #1f1e1b; --muted: #6b6a64; --line: #e3e1d9;
+    --accent: #0f6e56; --warn-bg: #faeeda; --warn: #854f0b; --danger-bg: #fcebeb; --danger: #a32d2d;
+    --radar-bg: #0e1412; --radar-line: #24312c; --own: #5dcaa5; --tgt: #b4b2a9; --tgt-warn: #ef9f27; --tgt-danger: #e24b4a; --aton: #85b7eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161615; --card: #1f1f1d; --text: #ecebe6; --muted: #9c9a92; --line: #2f2e2b;
+      --accent: #5dcaa5; --warn-bg: #412402; --warn: #fac775; --danger-bg: #501313; --danger: #f7c1c1; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  .pill { font-size: 13px; padding: 4px 10px; border-radius: 999px; background: var(--line); color: var(--muted); }
+  .pill.ok { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+  .pill.bad { background: var(--danger-bg); color: var(--danger); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .metric { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .metric .label { font-size: 12px; color: var(--muted); }
+  .metric .value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .row { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 760px) { .row { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; font-weight: 600; margin: 0 0 10px; color: var(--muted); }
+  canvas { width: 100%; aspect-ratio: 1; border-radius: 8px; background: var(--radar-bg); display: block; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  tr.warn td { background: var(--warn-bg); color: var(--warn); }
+  tr.danger td { background: var(--danger-bg); color: var(--danger); }
+  .table-wrap { overflow-x: auto; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .route { display: flex; gap: 18px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+  .xte { position: relative; height: 12px; background: var(--line); border-radius: 6px; margin-top: 10px; }
+  .xte .mid { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--muted); }
+  .xte .dot { position: absolute; top: 0; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); transform: translateX(-50%); }
+  code { font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>TZ Bridge</h1>
+    <span id="conn" class="pill">Connecting</span>
+  </header>
+
+  <div class="grid">
+    <div class="metric"><div class="label">Heading</div><div class="value" id="hdg">--</div></div>
+    <div class="metric"><div class="label">COG</div><div class="value" id="cog">--</div></div>
+    <div class="metric"><div class="label">SOG</div><div class="value" id="sog">--</div></div>
+    <div class="metric"><div class="label">Depth</div><div class="value" id="depth">--</div></div>
+    <div class="metric"><div class="label">Wind (app)</div><div class="value" id="wind">--</div></div>
+    <div class="metric"><div class="label">Rate of turn</div><div class="value" id="rot">--</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Active route</h2>
+    <div id="route" class="muted">No active route from TimeZero</div>
+    <div class="xte" id="xtebar" hidden><div class="mid"></div><div class="dot" id="xtedot"></div></div>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <h2>Targets (heading up, 3 nm ring)</h2>
+      <canvas id="radar" width="600" height="600"></canvas>
+    </div>
+    <div class="card">
+      <h2>AIS targets</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Type</th><th>Range</th><th>Bearing</th><th>CPA</th><th>TCPA</th><th>SOG</th></tr></thead>
+          <tbody id="targets"><tr><td colspan="7" class="muted">No AIS targets yet</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Data feed</h2>
+    <div id="stats" class="muted">Waiting for data</div>
+    <p class="muted">Glasses app endpoint: <code id="wsurl"></code></p>
+  </div>
+</main>
+
+<script>
+const CPA_WARN = 0.5, CPA_DANGER = 0.25, TCPA_LIMIT = 20;
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 0, unit = "") => (v === undefined || v === null) ? "--" : v.toFixed(d) + unit;
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+$("wsurl").textContent = wsUrl;
+
+function level(t) {
+  if (t.cpa_nm === undefined || t.tcpa_min === undefined || t.tcpa_min > TCPA_LIMIT) return "";
+  if (t.cpa_nm < CPA_DANGER) return "danger";
+  if (t.cpa_nm < CPA_WARN) return "warn";
+  return "";
+}
+
+function render(s) {
+  const o = s.own || {};
+  $("hdg").textContent = fmt(o.hdg ?? o.hdg_mag, 0, "°");
+  $("cog").textContent = fmt(o.cog, 0, "°");
+  $("sog").textContent = fmt(o.sog, 1, " kn");
+  $("depth").textContent = fmt(o.depth_m, 1, " m");
+  $("wind").textContent = o.aws !== undefined ? `${fmt(o.aws, 1)} kn ${fmt(o.awa, 0, "°")}` : "--";
+  $("rot").textContent = fmt(o.rot, 0, "°/min");
+
+  const r = s.route || {};
+  if (r.to_wp || r.range_nm !== undefined) {
+    $("route").className = "route";
+    $("route").innerHTML =
+      `<span><b>${esc(r.to_wp || "Waypoint")}</b></span>` +
+      `<span>${fmt(r.range_nm, 2, " nm")}</span>` +
+      `<span>BRG ${fmt(r.bearing, 0, "°")}</span>` +
+      `<span>XTE ${fmt(r.xte_nm, 2, " nm")}${r.steer ? " · steer " + (r.steer === "L" ? "left" : "right") : ""}</span>`;
+    if (r.xte_nm !== undefined) {
+      $("xtebar").hidden = false;
+      // steer L means boat is right of track: show dot right of centre
+      const side = r.steer === "L" ? 1 : -1;
+      const pct = Math.max(-1, Math.min(1, side * r.xte_nm / 0.1));
+      $("xtedot").style.left = (50 + pct * 45) + "%";
+    }
+  } else {
+    $("route").className = "muted";
+    $("route").textContent = "No active route from TimeZero";
+    $("xtebar").hidden = true;
+  }
+
+  const vessels = (s.targets || []).filter(t => t.kind === "vessel");
+  $("targets").innerHTML = vessels.length ? vessels.slice(0, 30).map(t => `
+    <tr class="${level(t)}">
+      <td>${esc(t.name || t.mmsi)}</td>
+      <td>${esc(t.type_label || "")}</td>
+      <td>${fmt(t.range_nm, 2, " nm")}</td>
+      <td>${fmt(t.bearing, 0, "°")}</td>
+      <td>${fmt(t.cpa_nm, 2, " nm")}</td>
+      <td>${fmt(t.tcpa_min, 0, " min")}</td>
+      <td>${fmt(t.sog, 1, " kn")}</td>
+    </tr>`).join("") : `<tr><td colspan="7" class="muted">No AIS targets yet</td></tr>`;
+
+  const st = s.stats || {};
+  const sent = Object.entries(st.sentences || {}).map(([k, v]) => `${k} ${v}`).join(" · ");
+  $("stats").textContent = `${st.lines || 0} lines · ${st.bad_checksum || 0} bad checksums · ${st.ais_decoded || 0} AIS decoded` +
+    (s.rx_age_s !== null && s.rx_age_s !== undefined ? ` · last data ${s.rx_age_s.toFixed(1)} s ago` : "") +
+    (sent ? ` · ${sent}` : "");
+  const live = s.rx_age_s !== null && s.rx_age_s !== undefined && s.rx_age_s < 5;
+  $("conn").className = "pill " + (live ? "ok" : "bad");
+  $("conn").textContent = live ? "Receiving data" : "Connected, no data";
+
+  drawRadar(s);
+}
+
+function drawRadar(s) {
+  const c = $("radar"), g = c.getContext("2d"), W = c.width, cx = W / 2, cy = W / 2, R = W / 2 - 20;
+  const css = getComputedStyle(document.documentElement), col = n => css.getPropertyValue(n).trim();
+  const range = 3, hdg = (s.own || {}).hdg ?? (s.own || {}).cog ?? 0;
+  g.clearRect(0, 0, W, W);
+  g.strokeStyle = col("--radar-line"); g.lineWidth = 2;
+  [1 / 3, 2 / 3, 1].forEach(f => { g.beginPath(); g.arc(cx, cy, R * f, 0, Math.PI * 2); g.stroke(); });
+  g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx, cy - R); g.stroke();
+  g.fillStyle = col("--muted"); g.font = "20px system-ui"; g.textAlign = "center";
+  g.fillText(range + " nm", cx, cy - R - 2 + 24);
+  (s.targets || []).forEach(t => {
+    if (t.range_nm === undefined || t.range_nm > range) return;
+    const a = (t.bearing - hdg) * Math.PI / 180, d = R * t.range_nm / range;
+    const x = cx + d * Math.sin(a), y = cy - d * Math.cos(a);
+    const lv = level(t);
+    g.fillStyle = t.kind === "aton" ? col("--aton") : lv === "danger" ? col("--tgt-danger") : lv === "warn" ? col("--tgt-warn") : col("--tgt");
+    if (t.kind === "aton") { g.fillRect(x - 6, y - 6, 12, 12); return; }
+    const ca = ((t.cog ?? t.hdg ?? 0) - hdg) * Math.PI / 180;
+    g.save(); g.translate(x, y); g.rotate(ca);
+    g.beginPath(); g.moveTo(0, -12); g.lineTo(8, 9); g.lineTo(-8, 9); g.closePath(); g.fill();
+    g.restore();
+  });
+  g.fillStyle = col("--own");
+  g.beginPath(); g.moveTo(cx, cy - 14); g.lineTo(cx + 9, cy + 10); g.lineTo(cx - 9, cy + 10); g.closePath(); g.fill();
+}
+
+function connect() {
+  const ws = new WebSocket(wsUrl);
+  ws.onmessage = e => { try { render(JSON.parse(e.data)); } catch (err) { console.error(err); } };
+  ws.onclose = () => { $("conn").className = "pill bad"; $("conn").textContent = "Bridge offline, retrying"; setTimeout(connect, 2000); };
+}
+connect();
+</script>
+</body>
+</html>

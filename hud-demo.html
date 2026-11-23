@@ -1,0 +1,574 @@
+<title>TZ Glasses HUD</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+  /* Layout: instrument console. Full-width viewport through the glasses, controls and a plot in a two-column rail beneath. Deliberately one dark look, like a nav station at dusk. */
+  :root {
+    color-scheme: dark;
+    --bg: #0c1316;
+    --panel: #131e23;
+    --panel-2: #182830;
+    --line: #233740;
+    --fg: #e2ebe8;
+    --muted: #8ea4a2;
+    --accent: #7fe3c0;
+    --accent-ink: #062a1f;
+    --warn: #ffc266;
+    --danger: #ff7d6e;
+    --font-display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--fg); font: 15px/1.55 var(--font-body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 20px 40px;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+  h1 { font: 600 28px/1.1 var(--font-display); letter-spacing: 0.01em; margin: 0; text-wrap: balance; }
+  .lede { color: var(--muted); margin: 4px 0 0; max-width: 68ch; }
+  .clock { font: 500 13px var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .stage { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #05090b; }
+  .stage canvas { display: block; width: 100%; touch-action: none; cursor: grab; }
+  .stage canvas:active { cursor: grabbing; }
+  .stage canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .caption { color: var(--muted); font-size: 13px; margin: 0; }
+  .rail { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 820px) { .rail { grid-template-columns: minmax(0, 1fr); } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 14px; min-width: 0; align-content: start; }
+  .label { font: 600 12px var(--font-display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; }
+  .group { display: grid; gap: 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button, .seg label {
+    font: 500 13px var(--font-body); color: var(--fg); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; cursor: pointer;
+  }
+  button:hover, .seg label:hover { border-color: var(--muted); }
+  button:focus-visible, input:focus-visible, select:focus-visible, .seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg label { border: 0; border-radius: 0; padding: 0; display: flex; }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg span { padding: 7px 12px; }
+  .seg input:checked + span { background: var(--accent); color: var(--accent-ink); }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  select { font: 500 13px var(--font-body); background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .readout { font: 500 13px var(--font-data); font-variant-numeric: tabular-nums; color: var(--accent); min-width: 15ch; }
+  .check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+  .check input { accent-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 13px; margin: 0; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font: 13px var(--font-data); font-variant-numeric: tabular-nums; }
+  th { text-align: left; font: 600 11px var(--font-display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td button { padding: 3px 8px; font-size: 12px; }
+  tr.warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+  tr.danger td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+  .sev { font-size: 11px; padding: 1px 6px; border-radius: 999px; margin-left: 6px; }
+  .sev.warn { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+  .sev.danger { background: color-mix(in srgb, var(--danger) 22%, transparent); color: var(--danger); }
+  #plot { width: 100%; max-width: 100%; aspect-ratio: 1; display: block; border-radius: 8px; background: #071014; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>TZ Glasses HUD</h1>
+      <p class="lede">What the Ray-Ban Display would show as you look around the boat. Labels come from AIS, the route and the charts, placed using the boat's heading plus your head turn, so no camera is involved. Drag the view or use the arrow keys to turn your head.</p>
+    </div>
+    <span class="clock" id="clock">Sim time 00:00</span>
+  </header>
+
+  <div class="stage" id="stage">
+    <canvas id="view" tabindex="0" aria-label="View through the glasses. Drag or use left and right arrow keys to turn your head."></canvas>
+  </div>
+  <p class="caption" id="caption">The dashed square is the lens display, about 20° wide. Ships and buoys outside it are the real world; labels only appear inside it.</p>
+
+  <div class="rail">
+    <div class="panel">
+      <div class="group">
+        <p class="label">View</p>
+        <div class="row">
+          <div class="seg" role="radiogroup" aria-label="View mode">
+            <label><input type="radio" name="mode" id="mode-world" value="world" checked><span>Wearer's view</span></label>
+            <label><input type="radio" name="mode" id="mode-lens" value="lens"><span>Lens only</span></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <p class="label">Head direction</p>
+        <input type="range" id="yaw" min="-180" max="180" step="1" value="0" aria-label="Head turn relative to the bow">
+        <div class="row">
+          <span class="readout" id="yaw-out">Looking at the bow</span>
+          <button data-yaw="-90">Port beam</button>
+          <button data-yaw="0">Bow</button>
+          <button data-yaw="90">Starboard beam</button>
+          <button data-yaw="180">Astern</button>
+          <button id="look-threat" class="primary">Look at closest threat</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <p class="label">Simulation</p>
+        <div class="row">
+          <button id="play">Pause</button>
+          <label class="check">Speed
+            <select id="speed" aria-label="Simulation speed">
+              <option value="1">1×</option>
+              <option value="10" selected>10×</option>
+              <option value="30">30×</option>
+            </select>
+          </label>
+          <button id="restart">Restart</button>
+          <button id="ack">Acknowledge alarm</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <p class="label">Real-world problems to test</p>
+        <label for="lag" class="hint">Display lag: <span id="lag-out">0 ms</span>. Bluetooth delay between head movement and the lens updating. Turn your head quickly to see labels trail.</label>
+        <input type="range" id="lag" min="0" max="400" step="10" value="0">
+        <div class="row">
+          <label class="check"><input type="checkbox" id="drift"> Head sensor drift</label>
+          <button id="recenter">Re-center (look at bow and pinch)</button>
+        </div>
+        <p class="hint" id="drift-out">With drift on, labels slowly slide off their ships. Re-center fixes it.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="label">Plot · north up · rings 1 nm</p>
+      <canvas id="plot" width="600" height="600" aria-label="Top-down plot of own boat, targets and where you are looking"></canvas>
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Lens view (20°)</span>
+        <span><i style="background: #2f4b55"></i>Your eyes</span>
+        <span><i style="background: var(--warn)"></i>CPA under 0.5 nm</span>
+        <span><i style="background: #e5534b"></i>Buoy</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="label">AIS targets</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Vessel</th><th>Type</th><th>Range</th><th>Bearing</th><th>CPA</th><th>TCPA</th><th>SOG</th><th></th></tr></thead>
+        <tbody id="targets"></tbody>
+      </table>
+    </div>
+    <p class="hint">Sample traffic near Halifax Harbour, the same scenario as the bridge's simulator. Bearings are relative to the bow: P is port, S is starboard.</p>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const rad = d => d * Math.PI / 180;
+  const wrap = a => ((a % 360) + 540) % 360 - 180;
+  const norm = a => ((a % 360) + 360) % 360;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  const CPA_WARN = 0.5, CPA_DANGER = 0.25, TCPA_LIMIT = 20;
+  const HUD = "#8ef0c8", HUD_DIM = "rgba(142,240,200,0.55)", AMBER = "#ffc266", RED = "#ff7d6e";
+  const DATA_FONT = '"IBM Plex Mono", ui-monospace, Menlo, monospace';
+  const LABEL_FONT = '"Barlow Semi Condensed", "Arial Narrow", sans-serif';
+
+  // ---------- geometry
+  function move(p, sog, cog, dt) {
+    const d = sog * dt / 3600;
+    return { lat: p.lat + d * Math.cos(rad(cog)) / 60,
+             lon: p.lon + d * Math.sin(rad(cog)) / (60 * Math.cos(rad(p.lat))) };
+  }
+  const offset = (p, brg, nm) => move(p, nm * 3600, brg, 1);
+  function geom(o, t) {
+    const dx = (t.lon - o.lon) * 60 * Math.cos(rad(o.lat)), dy = (t.lat - o.lat) * 60;
+    const rng = Math.hypot(dx, dy), brg = norm(Math.atan2(dx, dy) * 180 / Math.PI);
+    let cpa = null, tcpa = null;
+    if (t.sog !== undefined) {
+      const vx = t.sog * Math.sin(rad(t.cog)) - o.sog * Math.sin(rad(o.cog));
+      const vy = t.sog * Math.cos(rad(t.cog)) - o.sog * Math.cos(rad(o.cog));
+      const v2 = vx * vx + vy * vy;
+      const th = v2 < 1e-9 ? 0 : Math.max(0, -(dx * vx + dy * vy) / v2);
+      cpa = Math.hypot(dx + vx * th, dy + vy * th); tcpa = th * 60;
+    }
+    return { rng, brg, cpa, tcpa, dx, dy };
+  }
+
+  // ---------- scenario (matches nmea_sim.py)
+  let own, targets, buoys, wp, simT, ackUntil;
+  function reset() {
+    simT = 0; ackUntil = -1;
+    own = { lat: 44.6205, lon: -63.5560, sog: 6.5, hdg: 160, cog: 160 };
+    const place = (b, nm) => offset(own, b, nm);
+    // cargo ship set up to pass 0.3 nm ahead in about 7 minutes
+    const T = 7 * 60, ownT = offset(own, 160, 6.5 * T / 3600);
+    const cargoAtCpa = offset(ownT, 160, 0.3);
+    const cargoStart = move(cargoAtCpa, 12, 275 + 180, T);
+    targets = [
+      { name: "ATLANTIC SAMPLE", type: "Cargo", sog: 12, cog: 275, ...cargoStart },
+      { name: "BLUE HERON", type: "Sailing", sog: 4.5, cog: 340, ...place(200, 1.4) },
+      { name: "HARBOUR FERRY", type: "Passenger", sog: 9, cog: 60, ...place(250, 1.8) },
+      { name: "SEA SPRITE", type: "Pleasure", sog: 0.2, cog: 0, ...place(40, 2.8) },
+    ];
+    buoys = [
+      { name: "RED BUOY", color: "#e5534b", ...place(155, 1.2) },
+      { name: "GREEN BUOY", color: "#3fbf6f", ...place(170, 2.3) },
+    ];
+    wp = { name: "WP4 HARBOUR MOUTH", ...offset(own, 158, 4.0) };
+  }
+  function step(dt) {
+    simT += dt;
+    own.hdg = 160 + 4 * Math.sin(simT / 25);
+    own.cog = own.hdg;
+    Object.assign(own, move(own, own.sog, own.cog, dt));
+    targets.forEach(t => Object.assign(t, move(t, t.sog, t.cog, dt)));
+    if (simT > 18 * 60) reset();
+  }
+  function severity(g) {
+    if (g.cpa === null || g.tcpa > TCPA_LIMIT || g.tcpa <= 0) return "";
+    return g.cpa < CPA_DANGER ? "danger" : g.cpa < CPA_WARN ? "warn" : "";
+  }
+
+  // ---------- head state
+  let yawTarget = 0, yawTrue = 0, driftErr = 0;
+  const history = [];
+  let lagMs = 0, driftOn = false, playing = true, speed = 10, mode = "world";
+
+  function setYaw(v) {
+    yawTarget = wrap(v);
+    $("yaw").value = Math.round(yawTarget);
+  }
+  function yawText(y) {
+    const r = Math.round(wrap(y));
+    if (Math.abs(r) <= 2) return "Looking at the bow";
+    if (Math.abs(r) >= 178) return "Looking astern";
+    return `Looking ${Math.abs(r)}° ${r < 0 ? "to port" : "to starboard"}`;
+  }
+
+  // ---------- canvas setup
+  const view = $("view"), vctx = view.getContext("2d");
+  const plot = $("plot"), pctx = plot.getContext("2d");
+  let W = 0, H = 0, dpr = 1;
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cw = view.parentElement.clientWidth;
+    const ch = Math.round(cw * (cw < 600 ? 0.8 : 0.5));
+    view.style.height = ch + "px";
+    W = view.width = Math.round(cw * dpr);
+    H = view.height = Math.round(ch * dpr);
+  }
+  new ResizeObserver(resize).observe(view.parentElement);
+  resize();
+
+  // ---------- world rendering
+  const fovDeg = () => (W / dpr < 600 ? 50 : 70);
+  function landHeight(abs) {
+    const a = norm(abs);
+    const inLand = a >= 250 || a <= 40;
+    if (!inLand) return 0;
+    const fade = clamp((a >= 250 ? a - 250 : 40 - a) / 12, 0, 1);
+    return fade * (0.55 + 0.25 * Math.sin(a * 0.21) + 0.2 * Math.sin(a * 0.57 + 1));
+  }
+
+  function objY(hy, rng) { return hy + clamp(0.045 * H / Math.max(rng, 0.15), 2 * dpr, 0.2 * H); }
+  function objScale(rng) { return clamp(1.1 / Math.max(rng, 0.2), 0.35, 3.2) * dpr; }
+
+  function drawShip(c, x, y, s, t, aspect) {
+    const len = (18 + 30 * aspect) * s;
+    c.save(); c.translate(x, y);
+    c.fillStyle = "#0a1215";
+    if (t.type === "Sailing") {
+      c.beginPath(); c.moveTo(-len * 0.45, 0); c.lineTo(len * 0.45, 0); c.lineTo(len * 0.35, 4 * s); c.lineTo(-len * 0.35, 4 * s); c.fill();
+      c.beginPath(); c.moveTo(0, -1); c.lineTo(0, -26 * s); c.lineTo(len * 0.3, -2 * s); c.closePath(); c.fill();
+      c.fillStyle = "#c9d2cf"; c.beginPath(); c.moveTo(-1 * s, -2); c.lineTo(-1 * s, -24 * s); c.lineTo(-len * 0.28, -2 * s); c.closePath(); c.fill();
+    } else if (t.type === "Cargo") {
+      c.beginPath(); c.moveTo(-len * 0.5, -6 * s); c.lineTo(len * 0.5, -6 * s); c.lineTo(len * 0.44, 3 * s); c.lineTo(-len * 0.48, 3 * s); c.fill();
+      c.fillRect(-len * 0.46, -14 * s, 9 * s, 8 * s);
+      ["#b5543f", "#3d6f8f", "#c09a3b", "#55705a"].forEach((col, i) => { c.fillStyle = col; c.fillRect(-len * 0.3 + i * len * 0.18, -11 * s, len * 0.16, 5 * s); });
+      c.fillStyle = "#ffe9a6"; c.fillRect(-len * 0.44, -12 * s, 2 * s, 2 * s);
+    } else if (t.type === "Passenger") {
+      c.beginPath(); c.moveTo(-len * 0.45, -4 * s); c.lineTo(len * 0.45, -4 * s); c.lineTo(len * 0.4, 3 * s); c.lineTo(-len * 0.4, 3 * s); c.fill();
+      c.fillStyle = "#d8dfdc"; c.fillRect(-len * 0.32, -10 * s, len * 0.62, 6 * s);
+      c.fillStyle = "#ffe9a6"; for (let i = 0; i < 6; i++) c.fillRect(-len * 0.28 + i * len * 0.1, -8 * s, 2 * s, 2 * s);
+    } else {
+      c.beginPath(); c.moveTo(-len * 0.3, -3 * s); c.lineTo(len * 0.3, -3 * s); c.lineTo(len * 0.24, 2 * s); c.lineTo(-len * 0.28, 2 * s); c.fill();
+      c.fillStyle = "#d8dfdc"; c.fillRect(-len * 0.08, -7 * s, len * 0.16, 4 * s);
+    }
+    c.restore();
+  }
+  function drawBuoy(c, x, y, s, color) {
+    c.save(); c.translate(x, y);
+    c.fillStyle = color; c.beginPath(); c.moveTo(-4 * s, 0); c.lineTo(4 * s, 0); c.lineTo(2.5 * s, -12 * s); c.lineTo(-2.5 * s, -12 * s); c.fill();
+    c.fillStyle = "#0a1215"; c.fillRect(-0.6 * s, -16 * s, 1.2 * s, 4 * s);
+    c.restore();
+  }
+
+  function render(nowMs) {
+    const c = vctx, fov = fovDeg(), ppd = W / fov, hy = H * 0.5;
+    const hTrue = own.hdg + yawTrue;
+    const lagged = lagSample(nowMs);
+    const hEst = own.hdg + lagged + driftErr;
+    const lens = 20 * ppd, lx = W / 2 - lens / 2, ly = hy - lens * 0.56;
+    const xWorld = b => W / 2 + wrap(b - hTrue) * ppd;
+    const xHud = b => W / 2 + wrap(b - hEst) * ppd;
+
+    const gt = targets.map(t => ({ t, g: geom(own, t) }));
+    const gb = buoys.map(b => ({ b, g: geom(own, b) }));
+    const gw = geom(own, wp);
+
+    c.clearRect(0, 0, W, H);
+    if (mode === "world") {
+      c.fillStyle = "#1c2d3a"; c.fillRect(0, 0, W, hy);
+      c.fillStyle = "#28404f"; c.fillRect(0, hy - H * 0.08, W, H * 0.08);
+      c.fillStyle = "#0f1d24"; c.fillRect(0, hy, W, H - hy);
+      c.fillStyle = "#132630"; for (let i = 1; i < 6; i++) { const yy = hy + (H - hy) * (i * i) / 36; c.fillRect(0, yy, W, Math.max(1, dpr)); }
+      // shoreline behind the boat
+      c.fillStyle = "#0b161c"; c.beginPath(); c.moveTo(0, hy);
+      for (let px = 0; px <= W; px += 4 * dpr) {
+        const abs = hTrue + (px - W / 2) / ppd;
+        c.lineTo(px, hy - landHeight(abs) * H * 0.07);
+      }
+      c.lineTo(W, hy); c.closePath(); c.fill();
+      // bow reference: the boat's own heading on the horizon
+      const xb = xWorld(own.hdg);
+      if (xb > -20 && xb < W + 20) { c.fillStyle = "rgba(226,235,232,0.35)"; c.fillRect(xb - 0.5 * dpr, hy + 6 * dpr, dpr, 10 * dpr); }
+      // far objects first
+      [...gb.map(o => ({ k: "b", ...o })), ...gt.map(o => ({ k: "t", ...o }))]
+        .sort((a, b) => b.g.rng - a.g.rng)
+        .forEach(o => {
+          const x = xWorld(o.g.brg); if (x < -80 * dpr || x > W + 80 * dpr) return;
+          const y = objY(hy, o.g.rng), s = objScale(o.g.rng);
+          if (o.k === "b") drawBuoy(c, x, y, s * 0.8, o.b.color);
+          else drawShip(c, x, y, s, o.t, Math.abs(Math.sin(rad(o.t.cog - o.g.brg))));
+        });
+      c.fillStyle = "rgba(0,0,0,0.18)"; c.fillRect(lx, ly, lens, lens);
+    } else {
+      c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
+    }
+
+    // lens frame
+    c.save();
+    c.setLineDash([6 * dpr, 5 * dpr]); c.strokeStyle = "rgba(226,235,232,0.45)"; c.lineWidth = dpr;
+    c.strokeRect(lx, ly, lens, lens);
+    c.restore();
+
+    // ---------- HUD (clipped to lens)
+    c.save();
+    c.beginPath(); c.rect(lx, ly, lens, lens); c.clip();
+    const fs = clamp(lens / dpr / 19, 9, 13) * dpr;
+    const font = (w, k = 1) => `${w} ${Math.round(fs * k)}px ${DATA_FONT}`;
+    c.textBaseline = "middle";
+
+    // top strip
+    c.font = font(500); c.fillStyle = HUD; c.textAlign = "left";
+    c.fillText(`HDG ${Math.round(norm(own.hdg)).toString().padStart(3, "0")}°`, lx + fs * 0.6, ly + fs * 1.1);
+    c.textAlign = "right";
+    c.fillText(`${own.sog.toFixed(1)} KN`, lx + lens - fs * 0.6, ly + fs * 1.1);
+    // compass tape: head bearing
+    c.textAlign = "center"; c.fillStyle = HUD_DIM; c.font = font(400, 0.85);
+    c.fillText(`${Math.round(norm(hEst)).toString().padStart(3, "0")}°`, lx + lens / 2, ly + fs * 2.4);
+
+    // waypoint diamond
+    const xw = xHud(gw.brg);
+    const yw = hy - 2 * dpr;
+    if (xw > lx && xw < lx + lens) {
+      c.strokeStyle = HUD; c.lineWidth = 1.5 * dpr;
+      const d = fs * 0.5; c.beginPath(); c.moveTo(xw, yw - d); c.lineTo(xw + d, yw); c.lineTo(xw, yw + d); c.lineTo(xw - d, yw); c.closePath(); c.stroke();
+      c.fillStyle = HUD; c.font = font(500, 0.85); c.textAlign = "center";
+      c.fillText(`WP4 ${gw.rng.toFixed(1)}`, xw, yw - fs * 1.2);
+    }
+
+    // buoys
+    gb.forEach(({ b, g }) => {
+      const x = xHud(g.brg); if (x < lx - 20 || x > lx + lens + 20) return;
+      const y = objY(hy, g.rng) - objScale(g.rng) * 0.8 * 16;
+      c.strokeStyle = HUD_DIM; c.lineWidth = dpr; c.beginPath(); c.arc(x, y - fs * 0.4, fs * 0.35, 0, Math.PI * 2); c.stroke();
+      c.fillStyle = HUD_DIM; c.font = font(400, 0.8); c.textAlign = "center";
+      c.fillText(`${b.name.split(" ")[0]} ${g.rng.toFixed(1)}`, x, y - fs * 1.3);
+    });
+
+    // vessels
+    gt.forEach(({ t, g }) => {
+      const x = xHud(g.brg); if (x < lx - 40 || x > lx + lens + 40) return;
+      const sev = severity(g), col = sev === "danger" ? RED : sev === "warn" ? AMBER : HUD;
+      const s = objScale(g.rng), y = objY(hy, g.rng);
+      const bw = (14 + 20 * Math.abs(Math.sin(rad(t.cog - g.brg)))) * s * 0.6 + fs * 0.6;
+      const top = y - 22 * s - fs * 0.4, bot = y + 5 * s;
+      c.strokeStyle = col; c.lineWidth = 1.5 * dpr;
+      const k = fs * 0.5;
+      [[x - bw, top, 1, 1], [x + bw, top, -1, 1], [x - bw, bot, 1, -1], [x + bw, bot, -1, -1]].forEach(([px, py, sx, sy]) => {
+        c.beginPath(); c.moveTo(px + sx * k, py); c.lineTo(px, py); c.lineTo(px, py + sy * k); c.stroke();
+      });
+      c.fillStyle = col; c.textAlign = "center";
+      c.font = `600 ${Math.round(fs * 1.05)}px ${LABEL_FONT}`;
+      c.fillText(t.name, x, top - fs * 1.75);
+      c.font = font(400, 0.85);
+      const line2 = sev ? `CPA ${g.cpa.toFixed(2)} · ${Math.round(g.tcpa)} MIN` : `${g.rng.toFixed(1)} NM · ${t.sog.toFixed(0)} KN`;
+      c.fillText(line2, x, top - fs * 0.7);
+    });
+
+    // edge arrows for things outside the lens: alarms and waypoint
+    const edgeItems = [];
+    gt.forEach(({ t, g }) => { const sev = severity(g); if (sev) edgeItems.push({ label: t.name.split(" ")[0], rel: wrap(g.brg - hEst), col: sev === "danger" ? RED : AMBER }); });
+    edgeItems.push({ label: "WP4", rel: wrap(gw.brg - hEst), col: HUD_DIM });
+    let li = 0, ri = 0;
+    edgeItems.forEach(e => {
+      if (Math.abs(e.rel) < 10) return;
+      const left = e.rel < 0, n = left ? li++ : ri++;
+      const y = ly + lens * 0.42 + n * fs * 1.5;
+      c.fillStyle = e.col; c.font = font(500, 0.85); c.textAlign = left ? "left" : "right";
+      c.fillText(left ? `‹ ${e.label} ${Math.round(-e.rel)}°` : `${e.label} ${Math.round(e.rel)}° ›`, left ? lx + fs * 0.5 : lx + lens - fs * 0.5, y);
+    });
+
+    // alarm banner
+    const alarm = gt.map(o => ({ ...o, sev: severity(o.g) })).filter(o => o.sev).sort((a, b) => a.g.cpa - b.g.cpa)[0];
+    if (alarm && simT > ackUntil) {
+      const col = alarm.sev === "danger" ? RED : AMBER;
+      const bh = fs * 2.7, by = ly + lens - bh - fs * 0.5;
+      c.strokeStyle = col; c.lineWidth = 1.5 * dpr; c.strokeRect(lx + fs * 0.5, by, lens - fs, bh);
+      c.fillStyle = col; c.textAlign = "center";
+      c.font = `600 ${Math.round(fs)}px ${LABEL_FONT}`;
+      c.fillText(`CPA ${alarm.g.cpa.toFixed(2)} NM IN ${Math.round(alarm.g.tcpa)} MIN`, lx + lens / 2, by + bh * 0.33);
+      c.font = font(400, 0.8);
+      const r = Math.round(wrap(alarm.g.brg - own.hdg));
+      c.fillText(`${alarm.t.name.split(" ")[0]} · ${Math.abs(r)}° ${r < 0 ? "PORT" : "STBD"} · PINCH TO ACK`, lx + lens / 2, by + bh * 0.72);
+    } else {
+      c.fillStyle = HUD_DIM; c.font = font(400, 0.85); c.textAlign = "left";
+      c.fillText(`DEPTH ${(22 + 3 * Math.sin(simT / 40)).toFixed(0)} M`, lx + fs * 0.6, ly + lens - fs * 1.1);
+    }
+    c.restore();
+
+    if (mode === "lens") {
+      c.fillStyle = "rgba(226,235,232,0.5)"; c.font = `${Math.round(12 * dpr)}px ${DATA_FONT}`; c.textAlign = "center"; c.textBaseline = "alphabetic";
+      c.fillText("Black is see-through on the real display", W / 2, ly + lens + 22 * dpr);
+    }
+
+    drawPlot(gt, gb, gw, hEst, fov);
+  }
+
+  function drawPlot(gt, gb, gw, hEst, fov) {
+    const c = pctx, S = plot.width, cx = S / 2, cy = S / 2, R = S / 2 - 24, range = 3, pnm = R / range;
+    c.clearRect(0, 0, S, S);
+    const wedge = (from, to, fill) => {
+      c.fillStyle = fill; c.beginPath(); c.moveTo(cx, cy);
+      c.arc(cx, cy, R, rad(from - 90), rad(to - 90)); c.closePath(); c.fill();
+    };
+    wedge(own.hdg + yawTrue - fov / 2, own.hdg + yawTrue + fov / 2, "rgba(47,75,85,0.55)");
+    wedge(hEst - 10, hEst + 10, "rgba(127,227,192,0.28)");
+    c.strokeStyle = "#1f3540"; c.lineWidth = 2;
+    for (let i = 1; i <= 3; i++) { c.beginPath(); c.arc(cx, cy, pnm * i, 0, Math.PI * 2); c.stroke(); }
+    c.fillStyle = "#8ea4a2"; c.font = `22px ${LABEL_FONT}`; c.textAlign = "center"; c.textBaseline = "middle";
+    c.fillText("N", cx, 14);
+    // route line to waypoint
+    const toXY = g => [cx + g.dx * pnm, cy - g.dy * pnm];
+    let [wx, wy] = toXY(gw);
+    const wl = Math.hypot(wx - cx, wy - cy); if (wl > R) { wx = cx + (wx - cx) * R / wl; wy = cy + (wy - cy) * R / wl; }
+    c.setLineDash([8, 8]); c.strokeStyle = "rgba(142,240,200,0.5)"; c.beginPath(); c.moveTo(cx, cy); c.lineTo(wx, wy); c.stroke(); c.setLineDash([]);
+    gb.forEach(({ b, g }) => { if (g.rng > range) return; const [x, y] = toXY(g); c.fillStyle = b.color; c.fillRect(x - 7, y - 7, 14, 14); });
+    gt.forEach(({ t, g }) => {
+      if (g.rng > range) return;
+      const [x, y] = toXY(g), sev = severity(g);
+      c.fillStyle = sev === "danger" ? RED : sev === "warn" ? AMBER : "#b8c4c1";
+      c.save(); c.translate(x, y); c.rotate(rad(t.cog));
+      c.beginPath(); c.moveTo(0, -14); c.lineTo(9, 10); c.lineTo(-9, 10); c.closePath(); c.fill();
+      c.strokeStyle = c.fillStyle; c.globalAlpha = 0.5; c.beginPath(); c.moveTo(0, -14); c.lineTo(0, -14 - t.sog * 5); c.stroke();
+      c.restore();
+    });
+    c.fillStyle = HUD; c.save(); c.translate(cx, cy); c.rotate(rad(own.hdg));
+    c.beginPath(); c.moveTo(0, -18); c.lineTo(11, 13); c.lineTo(-11, 13); c.closePath(); c.fill(); c.restore();
+  }
+
+  function lagSample(nowMs) {
+    if (lagMs <= 0) return yawTrue;
+    const tt = nowMs - lagMs;
+    for (let i = history.length - 1; i >= 0; i--) if (history[i].t <= tt) return history[i].y;
+    return history.length ? history[0].y : yawTrue;
+  }
+
+  // ---------- target table
+  function renderTable() {
+    const rows = targets.map(t => ({ t, g: geom(own, t) })).sort((a, b) => a.g.rng - b.g.rng);
+    $("targets").innerHTML = rows.map(({ t, g }, i) => {
+      const sev = severity(g), r = Math.round(wrap(g.brg - own.hdg));
+      const sevTag = sev ? `<span class="sev ${sev}">${sev === "danger" ? "Danger" : "Close"}</span>` : "";
+      return `<tr class="${sev}">
+        <td>${t.name}${sevTag}</td><td>${t.type}</td>
+        <td>${g.rng.toFixed(2)} nm</td><td>${Math.abs(r)}° ${r < 0 ? "P" : "S"}</td>
+        <td>${g.cpa.toFixed(2)} nm</td><td>${g.tcpa > 0 ? Math.round(g.tcpa) + " min" : "Opening"}</td>
+        <td>${t.sog.toFixed(1)} kn</td>
+        <td><button data-look="${t.name}">Look</button></td></tr>`;
+    }).join("");
+    $("clock").textContent = `Sim time ${String(Math.floor(simT / 60)).padStart(2, "0")}:${String(Math.floor(simT % 60)).padStart(2, "0")}`;
+  }
+  function lookAt(name) {
+    const t = targets.find(x => x.name === name); if (!t) return;
+    setYaw(wrap(geom(own, t).brg - own.hdg));
+  }
+
+  // ---------- controls
+  $("yaw").addEventListener("input", e => setYaw(+e.target.value));
+  document.querySelectorAll("[data-yaw]").forEach(b => b.addEventListener("click", () => setYaw(+b.dataset.yaw)));
+  $("targets").addEventListener("click", e => { const b = e.target.closest("[data-look]"); if (b) lookAt(b.dataset.look); });
+  $("look-threat").addEventListener("click", () => {
+    const best = targets.map(t => ({ t, g: geom(own, t) })).filter(o => o.g.tcpa > 0).sort((a, b) => a.g.cpa - b.g.cpa)[0];
+    if (best) lookAt(best.t.name);
+  });
+  $("play").addEventListener("click", () => { playing = !playing; $("play").textContent = playing ? "Pause" : "Play"; });
+  $("speed").addEventListener("change", e => { speed = +e.target.value; });
+  $("restart").addEventListener("click", () => { reset(); renderTable(); });
+  $("ack").addEventListener("click", () => { ackUntil = simT + 120; });
+  $("lag").addEventListener("input", e => { lagMs = +e.target.value; $("lag-out").textContent = lagMs + " ms"; });
+  $("drift").addEventListener("change", e => { driftOn = e.target.checked; });
+  $("recenter").addEventListener("click", () => { driftErr = 0; });
+  document.querySelectorAll('input[name="mode"]').forEach(r => r.addEventListener("change", e => {
+    mode = e.target.value;
+    $("caption").textContent = mode === "lens"
+      ? "Only what the glasses draw. On the real display, black is transparent, so these labels float over the water."
+      : "The dashed square is the lens display, about 20° wide. Ships and buoys outside it are the real world; labels only appear inside it.";
+  }));
+
+  let dragX = null;
+  view.addEventListener("pointerdown", e => { dragX = e.clientX; view.setPointerCapture(e.pointerId); });
+  view.addEventListener("pointermove", e => {
+    if (dragX === null) return;
+    const ppdCss = (W / dpr) / fovDeg();
+    setYaw(yawTarget - (e.clientX - dragX) / ppdCss);
+    dragX = e.clientX;
+  });
+  const endDrag = () => { dragX = null; };
+  view.addEventListener("pointerup", endDrag); view.addEventListener("pointercancel", endDrag);
+  view.addEventListener("keydown", e => {
+    if (e.key === "ArrowLeft") { setYaw(yawTarget - 5); e.preventDefault(); }
+    if (e.key === "ArrowRight") { setYaw(yawTarget + 5); e.preventDefault(); }
+  });
+
+  // ---------- loop
+  reset();
+  let last = performance.now(), tableAt = 0;
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    if (playing) step(dt * speed);
+    yawTrue += wrap(yawTarget - yawTrue) * Math.min(1, dt * 7);
+    yawTrue = wrap(yawTrue);
+    history.push({ t: now, y: yawTrue });
+    while (history.length && history[0].t < now - 1000) history.shift();
+    if (driftOn) driftErr += 0.35 * dt;
+    $("yaw-out").textContent = yawText(yawTrue);
+    $("drift-out").textContent = driftOn
+      ? `Sensor error now ${driftErr.toFixed(1)}°. Labels shift off their ships as it grows. Re-center fixes it.`
+      : "With drift on, labels slowly slide off their ships. Re-center fixes it.";
+    render(now);
+    if (now - tableAt > 500) { renderTable(); tableAt = now; }
+    requestAnimationFrame(frame);
+  }
+  renderTable();
+  requestAnimationFrame(frame);
+})();
+</script>

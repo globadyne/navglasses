@@ -1,0 +1,3 @@
+pyais>=2.6
+aiohttp>=3.9
+pyserial>=3.5

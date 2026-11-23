@@ -1,0 +1,10 @@
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+.swiftpm/
+ios/TZGlasses.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+# Python
+__pycache__/
+*.pyc
