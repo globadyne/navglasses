@@ -50,7 +50,10 @@ enum HUDImageRenderer {
     let ns = s as NSString
     let w = ns.size(withAttributes: attrs).width
     var origin = p
-    if align == .center { origin.x -= w / 2 }
+    if align == .center {
+      // Keep centred labels fully inside the lens when their target is near the edge.
+      origin.x = min(max(p.x - w / 2, 8), size.width - 8 - w)
+    }
     if align == .right { origin.x -= w }
     ns.draw(at: origin, withAttributes: attrs)
   }
@@ -112,8 +115,8 @@ enum HUDImageRenderer {
       text(item.detail, at: CGPoint(x: x, y: y - 42), font: font(20, .regular), color: col, align: .center)
     }
 
-    // Edge cues for things out of view.
-    var leftY: CGFloat = 330, rightY: CGFloat = 330
+    // Edge cues for things out of view: under the top strip, clear of the labels below.
+    var leftY: CGFloat = 96, rightY: CGFloat = 96
     for e in f.edges {
       let col = color(e.severity)
       if e.turnDeg < 0 {
