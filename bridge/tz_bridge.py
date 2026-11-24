@@ -212,6 +212,39 @@ def tz_geometry(blob):
     return blob[0], pts
 
 
+def tz_signature(path, queries):
+    """A cheap fingerprint of a TimeZero database's contents, or None if it can't be
+    read right now. Backs up the file-time check: Windows doesn't always update a file's
+    time while TimeZero holds it open, and new data may sit in the -wal file."""
+    try:
+        uri = Path(path).resolve().as_uri() + "?mode=ro"
+        con = sqlite3.connect(uri, uri=True, timeout=2)
+        try:
+            con.execute("PRAGMA query_only = ON")
+            out = []
+            for q in queries:                  # each on its own: a missing table only blanks its part
+                try:
+                    out.append(tuple(con.execute(q).fetchone() or ()))
+                except sqlite3.Error:
+                    out.append(None)
+            return tuple(out) if any(o is not None for o in out) else None
+        finally:
+            con.close()
+    except (sqlite3.Error, OSError):
+        return None
+
+
+# Any added, edited or deleted mark or route changes one of these (TimeZero stamps
+# LastModificationDate on every change), as does starting or moving along a route.
+TZ_OBJECTS_SIGNATURE = (
+    "SELECT count(*), total(Deleted), max(LastModificationDate), total(LastModificationDate) FROM UserObject",
+    "SELECT group_concat(quote(RouteGuid) || ':' || NextDestinationPointIndex) FROM ActiveRoute")
+# New track pieces, a growing current piece, or a deleted track.
+TZ_TRACKS_SIGNATURE = (
+    "SELECT count(*), max(FID), max(DateMax), total(Obsolete) FROM Portions",
+    "SELECT total(Obsolete) FROM Tracks")
+
+
 def load_tzdb(path):
     """Read marks, routes and the active route from TimeZero's UserObjects.tzdb, read-only."""
     uri = Path(path).resolve().as_uri() + "?mode=ro"
@@ -300,6 +333,10 @@ class UserData:
                 mt[f] = f.stat().st_mtime
             except OSError:
                 pass
+        if self.tzdb:
+            sig = tz_signature(self.tzdb, TZ_OBJECTS_SIGNATURE)
+            # Can't read it this moment (TimeZero mid-write): judge by file times alone.
+            mt["contents"] = sig if sig is not None else self.mtimes.get("contents")
         if mt == self.mtimes:
             return False
         marks, routes, tracks, errors = [], [], [], []
@@ -811,14 +848,17 @@ class BoatState:
                 mt.append(Path(str(path) + suffix).stat().st_mtime)
             except OSError:
                 pass
-        key = (tuple(mt), round(lat * 120), round(lon * 120 * math.cos(math.radians(lat))))
+        sig = tz_signature(path, TZ_TRACKS_SIGNATURE)
+        if sig is None and self.tz_tracks_key:
+            sig = self.tz_tracks_key[1]                  # unreadable this moment: keep the last one
+        key = (tuple(mt), sig, round(lat * 120), round(lon * 120 * math.cos(math.radians(lat))))
         return None if key == self.tz_tracks_key else key
 
     def userdata(self):
         return {"version": max(self.user.version, self.tz_tracks_version), "marks": self.user.marks, "routes": self.user.routes,
                 "tracks": self.user.tracks + self.tz_tracks, "own_track": self.own_track,
                 "active_route": self.user.active_route,
-                "files": [f.name for f in self.user.mtimes], "errors": self.user.errors}
+                "files": [f.name for f in self.user.mtimes if isinstance(f, Path)], "errors": self.user.errors}
 
 
 # ---------------------------------------------------------------- inputs
