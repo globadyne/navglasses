@@ -174,3 +174,17 @@ python tz_bridge.py --serial COM10 --udp 10110    # several at once
 | `nmea_sim.py` | Simulated TimeZero output for testing |
 | `sample_tz_export.gpx` | Sample TimeZero export with marks, a route and a track |
 | `requirements.txt` | Python packages |
+
+## Recording what TimeZero sends
+
+To capture TimeZero's output for testing (for example, to see how online AIS arrives), add `--record`:
+
+```
+python tz_bridge.py --udp 10110 --record tz-test.nmea
+```
+
+The bridge runs as normal and also saves every sentence it receives to `tz-test.nmea`, adding to the file if it already exists. Close the window to stop. Play a recording back later, without TimeZero, with:
+
+```
+python tz_bridge.py --replay tz-test.nmea
+```

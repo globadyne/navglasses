@@ -23,6 +23,7 @@ Examples
   python tz_bridge.py --tcp 192.168.1.50:10110
   python tz_bridge.py --replay sample.nmea
   python tz_bridge.py --udp 10110 --tzdb "C:\ProgramData\TimeZero\DATA\UserObjects.tzdb"
+  python tz_bridge.py --udp 10110 --record tz-test.nmea   (save what TimeZero sends)
   python tz_bridge.py --serial COM10 --gpx "C:\Users\me\Documents\TZ Export"
 """
 import argparse
@@ -856,8 +857,17 @@ async def main_async(args):
         fwd_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         fwd = (fwd_sock, (host, int(port)))
 
+    rec = None
+    if args.record:
+        # Raw NMEA exactly as received, one sentence per line, so --replay can play it back.
+        # Appends, and flushes every line so nothing is lost if the window is closed.
+        rec = open(args.record, "a", encoding="ascii", errors="ignore", newline="\r\n", buffering=1)
+        log.info("Recording raw NMEA to %s", Path(args.record).resolve())
+
     def push(line):
         state.feed(line)
+        if rec and line.strip():
+            rec.write(line.strip() + "\n")
         if fwd and line.strip():
             try:
                 fwd[0].sendto((line.strip() + "\r\n").encode(), fwd[1])
@@ -909,6 +919,7 @@ def main():
     p.add_argument("--mark-range", type=float, default=10.0, help="send marks within this many nm")
     p.add_argument("--port", type=int, default=8080, help="HTTP/WebSocket port")
     p.add_argument("--interval", type=float, default=0.5, help="seconds between live updates")
+    p.add_argument("--record", help="also save the raw NMEA received to this file (appends; play it back with --replay)")
     p.add_argument("--forward-udp", help="also re-send raw NMEA to host:port (e.g. 255.255.255.255:10110)")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()

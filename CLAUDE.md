@@ -60,7 +60,9 @@ Gaze = boat heading at calibration + head turn since calibration + fine-tune. Us
 ## Target sources (AIS / ARPA / online AIS)
 
 - The bridge tags targets `source`: `"AIS"` (VDM, or TTM with acquisition `R` = reported), `"ARPA"` (TTM acquisition `A`/`M`, radar-tracked), or `"TTM"` (TTM without the field; treated as AIS). Unnamed ARPA targets are named `ARPA <number>`.
-- The app can hide AIS or ARPA (Settings → Targets) and draws ARPA in orange. The demo also has per-source **custom colours** and **Online AIS** (TimeZero 5's internet AIS, shown with its age); add those to the app. How TZ5 outputs online AIS over NMEA is unknown: check with real TZ5 output before relying on it, and always show its age, because it can be minutes old and must not be treated like live AIS for collision alarms.
+- **In the Swift app (2026-11-24):** sources `AIS`, `ARPA` and `ONLINE` (`HUDBuilder.sourceKey`; any `source` starting "ONLINE"). Each can be hidden and given its own label colour (Settings → Targets, `HUDSettings.sourceColors`, defaults as in the demo: AIS #8ff0c7, ARPA #ffb35c, online #7fc4ff). Online AIS shows its age from `age_s` ("4 MIN OLD") and is never used for collision alarms. The bridge doesn't tag anything `ONLINE` yet: TimeZero's UDP output wizard has no online-AIS option, so online targets may arrive as ordinary TTM with acquisition R and look like live AIS. Needs checking against real TZ5 output. How TZ5 outputs online AIS over NMEA is unknown: check with real TZ5 output before relying on it, and always show its age, because it can be minutes old and must not be treated like live AIS for collision alarms.
+
+- **Testing online AIS:** run the bridge with `--record tz-test.nmea` on the nav PC while TimeZero shows online targets, then look for how they arrive (TTM acquisition field, names, VDM) and tag them `ONLINE` in the bridge if anything sets them apart.
 
 ## Chart buoys and beacons (lower priority, per the user)
 
