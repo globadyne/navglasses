@@ -3,7 +3,7 @@
 TimeZero navigation and AIS shown on Meta Ray-Ban Display glasses as labels that stay on the real ships, buoys, marks and waypoints as you turn your head. No camera is involved: positions come from TimeZero, and head direction comes from the glasses' motion sensors.
 
 ```
-TimeZero (nav PC) ──UDP NMEA + database──> bridge/tz_bridge.py ──WiFi──> iPhone app ──Bluetooth──> Ray-Ban Display
+TimeZero (nav PC) ──UDP NMEA + database──> bridge/tz_bridge.py ──WiFi──> phone app ──Bluetooth──> Ray-Ban Display
                                                                               ▲
                                                          glasses motion sensors (head direction)
 ```
@@ -12,6 +12,7 @@ TimeZero (nav PC) ──UDP NMEA + database──> bridge/tz_bridge.py ──WiF
 |---|---|---|
 | `bridge/` | Reads TimeZero's NMEA output and marks database, serves live JSON | Windows nav PC |
 | `ios/` | iPhone app: head tracking, lens rendering, Meta glasses SDK | iPhone (built on a Mac) |
+| `android/` | Android app: the same app in Kotlin | Android phone (built on Windows or Mac) |
 | `hud-demo.html` | Browser demo of the lens view | Any browser |
 
 ## 1. Bridge (nav PC)
@@ -35,10 +36,14 @@ TimeZero sends NMEA by UDP to `127.0.0.1:10110` (Connection Wizard → UDP). Ope
 
 **Try it with no glasses and no boat first.** The app starts with demo data (Halifax Harbour). In Settings, turn on **Simulated glasses**, then on the main screen choose **Phone** as the head direction source. Hold the phone up and turn around: the lens view shows labels moving across, and the cargo ship turns into a collision alarm within about a minute.
 
+## 2b. Android app (on Windows or a Mac)
+
+See `android/README.md`. In short: open the `android/` folder in Android Studio, let it sync, plug in an Android phone (Android 12 or later) with USB debugging on, and press **Run**. It works the same way as the iPhone app: demo data, simulated glasses and the phone or slider head sources all work with no glasses.
+
 ## 3. Connect the real glasses
 
 1. In the **Meta AI** app: Settings → your glasses → turn on **Developer Mode**. The glasses need firmware v125 or later and Meta AI v272 or later for display access.
-2. In TZ Glasses, tap **Register with Meta AI** and approve in Meta AI.
+2. In TZ Glasses (iPhone or Android), tap **Register with Meta AI** and approve in Meta AI.
 3. Tap **Connect glasses**, then choose **Glasses** as the head direction source.
 4. Look at the bow and tap (pinch with the Neural Band) to re-centre.
 
@@ -47,7 +52,7 @@ TimeZero sends NMEA by UDP to `127.0.0.1:10110` (Connection Wizard → UDP). Ope
 ## 4. On the boat
 
 - Phone and nav PC on the same WiFi. In Settings, turn off **Use demo data** and enter the nav PC's address (the bridge prints it at start-up, such as `192.168.1.20`).
-- Keep the app open on screen. The phone's auto-lock is turned off while the app is in front. iOS pauses network connections for apps in the background, so locking the phone stops updates.
+- Keep the app open on screen. The phone's auto-lock is turned off while the app is in front. Both iOS and Android may pause network connections for apps in the background, so locking the phone stops updates.
 
 ## Gestures on the glasses
 
@@ -68,5 +73,6 @@ TimeZero sends NMEA by UDP to `127.0.0.1:10110` (Connection Wizard → UDP). Ope
 
 ```
 python3 ios/tests/test_head_math.py
+cd android && ./gradlew test        # same head-tracking cases, plus lens layout and bridge JSON
 ```
 Checks the head-tracking maths (mirrored from `HeadMath.swift`) against simulated head movements, including both quaternion conventions, a reversed gyroscope, tilted heads and re-centring.

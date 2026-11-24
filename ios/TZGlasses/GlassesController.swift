@@ -245,7 +245,16 @@ final class GlassesController {
           })
           let samples = m.samples
           tasks.append(Task { [weak self] in
+            // One motion feed can carry both the glasses and the Neural Band: two bodies moving
+            // independently. Only the head counts. Unlabelled (.unknown) samples are used only
+            // while no glasses-labelled sample has arrived, since some firmware leaves the source unset.
+            var lastGlassesSample = Date.distantPast
             for await s in samples {
+              switch s.source {
+              case .neuralBand: continue
+              case .glasses: lastGlassesSample = Date()
+              case .unknown: if Date().timeIntervalSince(lastGlassesSample) < 2 { continue }
+              }
               guard let self, let q = s.orientation else { continue }
               let sample = HeadSample(
                 timestampNs: s.timestampNs,

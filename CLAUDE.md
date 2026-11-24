@@ -7,12 +7,17 @@ Head-tracked AR navigation labels for Meta Ray-Ban Display glasses, fed by TimeZ
 - `bridge/`: Python, tested end to end (UDP, serial, TimeZero database, GPX, WebSocket). Runs on the user's Windows 11 nav PC next to TimeZero Professional **v4**.
 - `ios/`: written against the **real** Meta DAT SDK 1.1.0 interface files (`.swiftinterface` in the xcframeworks), following Meta's DisplayAccess sample. **It has not been compiled yet**: no Swift toolchain was available where it was written. The first job is to build it and fix any compile errors.
 - `ios/tests/test_head_math.py`: Python mirror of `HeadMath.swift`; passes. Keep the two in step if you change either.
+- `android/`: Kotlin + Jetpack Compose port of the iOS app, written against Meta's Android DAT SDK 1.1.0 samples (DisplayAccess, BirdSpotter). `core/` (pure Kotlin: HeadMath, HudModel, BoatData/Json, DemoFeed) **compiles and passes `CoreChecks.kt`** (same head-math cases as the Python test, 20 seeds). The Android/Meta/Compose layers **have not been through Gradle yet** (Google Maven was blocked where it was written): sync in Android Studio and fix compile errors first.
+- **Three implementations of HeadMath** (Swift, Kotlin, Python test). Change all three together.
+- Customers are in **Atlantic Canada: Nova Scotia, New Brunswick, PEI and Newfoundland**. Demo and examples use Halifax Harbour.
 
 ## First tasks
 
 1. `cd ios && xcodebuild -scheme TZGlasses -destination 'generic/platform=iOS Simulator' build` and fix errors. Expect small ones (result-builder edge cases in `HUDDisplayLayout.swift`, `@Observable` + `didSet`, Swift 5 vs 6 concurrency). The target is set to `SWIFT_VERSION = 5.0` with minimal concurrency checking on purpose; Meta's sample uses 6.0.
 2. Run in the simulator: demo data plus Settings → Simulated glasses should show the lens preview and the simulated glasses' own preview.
 3. Then on the user's iPhone with signing (their team). The bundle ID `com.tzglasses.hud` may need changing.
+
+Android: open `android/` in Android Studio, sync, `./gradlew test assembleDebug`. Likely fixes: exact names in Meta's Kotlin API (`MotionSource` values, `InputsConfiguration` defaults, `mockGlasses.services.display`), and Compose material3 API drift. The motion sample filter drops anything whose source name contains "NEURAL" because only `MotionSource.GLASSES` was confirmed in the samples; switch to the real enum constant once you see it.
 
 Regenerate the Xcode project after adding or removing Swift files: `python3 ios/make_xcodeproj.py`. Or convert to Xcode's synchronized folders if you prefer.
 
@@ -54,6 +59,14 @@ Gaze = boat heading at calibration + head turn since calibration + fine-tune. Us
 
 - The bridge tags targets `source`: `"AIS"` (VDM, or TTM with acquisition `R` = reported), `"ARPA"` (TTM acquisition `A`/`M`, radar-tracked), or `"TTM"` (TTM without the field; treated as AIS). Unnamed ARPA targets are named `ARPA <number>`.
 - The app can hide AIS or ARPA (Settings → Targets) and draws ARPA in orange. The demo also has per-source **custom colours** and **Online AIS** (TimeZero 5's internet AIS, shown with its age); add those to the app. How TZ5 outputs online AIS over NMEA is unknown: check with real TZ5 output before relying on it, and always show its age, because it can be minutes old and must not be treated like live AIS for collision alarms.
+
+## Chart buoys and beacons (lower priority, per the user)
+
+The user wants charted aids to navigation (buoys, beacons, lights) on the lens, kept current as charts are updated. TimeZero's own chart files (C-MAP, S-63) are encrypted, so read chart data directly in the bridge instead:
+- **S-57 ENC cells** (`.000` plus `.001`, `.002`… updates), e.g. with GDAL/OGR: layers BOYLAT, BOYCAR, BOYSPP, BOYSAW, BOYISD, BCNLAT, BCNCAR, BCNSPP, LIGHTS (OBJNAM, COLOUR, LITCHR, SIGPER). Watch the folder like the tzdb, so new update files apply automatically. Serve as `aton` targets (or a separate `charted` list) with a source tag `"CHART"`.
+- Region is CHS (Canadian Hydrographic Service) waters. CHS sells ENCs as S-57 and S-63; only unencrypted S-57 can be read. Ask the user which charts they hold before building.
+- Free fallback: OpenSeaMap seamarks (OSM `seamark:*` tags).
+- Live AIS AtoN (message 21) already comes through as `kind: "aton"`; de-duplicate charted aids against those by position.
 
 ## Ideas not built yet
 
