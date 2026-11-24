@@ -15,6 +15,8 @@ struct BoatSnapshot: Decodable, Sendable {
   var route: RouteInfo?
   var targets: [Target]?
   var marks: [Mark]?
+  /// Changes when the bridge reloads marks, routes or tracks (fetch /userdata.json again).
+  var userdataVersion: Double?
 
   static let decoder: JSONDecoder = {
     let decoder = JSONDecoder()
@@ -102,4 +104,24 @@ struct LooseString: Decodable, Sendable, ExpressibleByStringLiteral {
     else if let i = try? c.decode(Int.self) { value = String(i) }
     else { value = String(try c.decode(Double.self)) }
   }
+}
+
+/// A point of a recorded or saved track. `t` is seconds since 1970, when known.
+struct TrackPoint: Codable, Equatable, Sendable {
+  var lat: Double
+  var lon: Double
+  var t: Double?
+}
+
+struct SavedTrack: Decodable, Sendable {
+  var name: String?
+  var points: [TrackPoint]
+}
+
+/// What tz_bridge.py serves at /userdata.json. Only the tracks are used here; marks and
+/// routes already arrive in the live stream.
+struct UserData: Decodable, Sendable {
+  var version: Double?
+  var tracks: [SavedTrack]?
+  var ownTrack: [TrackPoint]?
 }

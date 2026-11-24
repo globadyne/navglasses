@@ -26,11 +26,16 @@ final class BridgeClient {
   }
 
   private(set) var snapshot: BoatSnapshot?
+  /// Tracks (and the bridge's own-track recording) from /userdata.json.
+  private(set) var userData: UserData?
   private(set) var status: Status = .off
   private(set) var lastMessageAt: Date?
   private(set) var address = ""
 
   @ObservationIgnored private var loop: Task<Void, Never>?
+  @ObservationIgnored private var userDataLoop: Task<Void, Never>?
+  @ObservationIgnored private var fetchedVersion: Double?
+  @ObservationIgnored private var fetchedAt = Date.distantPast
   @ObservationIgnored private var socket: URLSessionWebSocketTask?
   @ObservationIgnored private let session: URLSession = {
     let config = URLSessionConfiguration.default
@@ -66,11 +71,44 @@ final class BridgeClient {
         try? await Task.sleep(for: .seconds(2))
       }
     }
+    // Tracks: fetch when the bridge reloads its files, and every 30 s for the growing own track.
+    if let dataURL = Self.userDataURL(from: url) {
+      userDataLoop = Task { [weak self] in
+        while !Task.isCancelled {
+          await self?.refreshUserData(dataURL)
+          try? await Task.sleep(for: .seconds(2))
+        }
+      }
+    }
+  }
+
+  /// ws://host:port/ws -> http://host:port/userdata.json
+  static func userDataURL(from ws: URL) -> URL? {
+    guard var c = URLComponents(url: ws, resolvingAgainstBaseURL: false) else { return nil }
+    c.scheme = c.scheme == "wss" ? "https" : "http"
+    c.path = "/userdata.json"
+    return c.url
+  }
+
+  private func refreshUserData(_ url: URL) async {
+    guard status == .live || status == .noData else { return }
+    let version = snapshot?.userdataVersion
+    guard version != fetchedVersion || Date().timeIntervalSince(fetchedAt) > 30 else { return }
+    fetchedAt = Date()
+    guard let (data, _) = try? await session.data(from: url),
+          let ud = try? BoatSnapshot.decoder.decode(UserData.self, from: data) else { return }
+    userData = ud
+    fetchedVersion = version
   }
 
   func disconnect() {
     loop?.cancel()
     loop = nil
+    userDataLoop?.cancel()
+    userDataLoop = nil
+    userData = nil
+    fetchedVersion = nil
+    fetchedAt = .distantPast
     socket?.cancel(with: .goingAway, reason: nil)
     socket = nil
     status = .off

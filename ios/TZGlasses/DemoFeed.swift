@@ -21,6 +21,8 @@ struct DemoFeed {
   /// TimeZero route being navigated: (name, lat, lon), and the index of the waypoint steered to.
   private var route: [(String, Double, Double)] = []
   private var nextWp = 1
+  /// Saved and recorded tracks, as the bridge serves them at /userdata.json.
+  private(set) var userData = UserData()
   private struct DemoMark { var name: String; var icon: String; var lat: Double; var lon: Double }
   private var marks: [DemoMark] = []
 
@@ -61,6 +63,24 @@ struct DemoFeed {
     route = [("WP3", wp3.0, wp3.1), ("WP4 HARBOUR MOUTH", wp4.0, wp4.1),
              ("WP5 OUTER MARK", wp5.0, wp5.1), ("WP6 SAMBRO", wp6.0, wp6.1)]
     nextWp = 1
+    // Own track: the way out of the inner harbour, as the bridge would have recorded it.
+    let now = Date().timeIntervalSince1970
+    let trail = (1...60).reversed().map { i -> TrackPoint in
+      let p = place(338 + 10 * sin(Double(i) / 9), Double(i) * 0.03)
+      return TrackPoint(lat: p.0, lon: p.1, t: now - Double(i) * 30)
+    }
+    // A saved track from an earlier trip ("Saturday sail" in the bridge's sample GPX).
+    let sail: [(Double, Double)] = [(44.6262, -63.5668), (44.6180, -63.5580), (44.6100, -63.5500), (44.6010, -63.5420),
+                                    (44.5930, -63.5380), (44.5850, -63.5400), (44.5780, -63.5470)]
+    var saved: [TrackPoint] = []
+    for i in 0..<(sail.count - 1) {
+      for k in 0..<12 {
+        let f = Double(k) / 12, w = 0.00025 * sin(Double(i * 12 + k) / 2.3)
+        saved.append(TrackPoint(lat: sail[i].0 + (sail[i + 1].0 - sail[i].0) * f + w,
+                                lon: sail[i].1 + (sail[i + 1].1 - sail[i].1) * f - w))
+      }
+    }
+    userData = UserData(version: now, tracks: [SavedTrack(name: "Saturday sail", points: saved)], ownTrack: trail)
     // TimeZero marks, as in hud-demo.html.
     let pots = place(149, 0.55), shoal = place(176, 1.45), anchorage = place(305, 0.7)
     marks = [

@@ -173,7 +173,23 @@ enum HUDImageRenderer {
   private static func draw(_ f: HUDFrame, in c: CGContext) {
     let W = size.width, H = size.height
 
-    // Ground layer first, so labels draw over it.
+    // Ground layer first, so labels draw over it: tracks, then the route.
+    for t in f.tracks {
+      for run in t.runs {
+        c.move(to: cg(run[0])); run.dropFirst().forEach { c.addLine(to: cg($0)) }
+      }
+      c.setLineCap(.round); c.setLineJoin(.round)
+      switch t.style {
+      case .own:
+        c.setStrokeColor(UIColor(red: 1.0, green: 0.80, blue: 0.35, alpha: 1).cgColor)
+        c.setLineWidth(3.5)
+      case .saved:
+        c.setStrokeColor(UIColor(red: 0.43, green: 0.77, blue: 1.0, alpha: 1).cgColor)
+        c.setLineWidth(2.5); c.setLineDash(phase: 0, lengths: [3, 7])
+      }
+      c.strokePath()
+      c.setLineDash(phase: 0, lengths: []); c.setLineCap(.butt); c.setLineJoin(.miter)
+    }
     if let route = f.route { drawRoute(route, in: c) }
 
     // Top strip: boat heading, gaze bearing, speed.

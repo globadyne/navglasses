@@ -133,6 +133,61 @@ struct HUDRoute: Equatable, Sendable {
   var clock: Double = 0
 }
 
+enum TrackStyle: Sendable {
+  /// This boat's recorded track: amber, solid.
+  case own
+  /// A saved track (GPX from TimeZero): blue, dotted.
+  case saved
+}
+
+/// A track lying on the water, as unbroken runs of lens points (a run ends where the
+/// track passes behind the wearer or under the boat).
+struct HUDTrack: Equatable, Sendable {
+  var style: TrackStyle
+  var runs: [[LensPoint]]
+}
+
+/// Tracks handed to `HUDBuilder.build`.
+struct TrackInput: Sendable {
+  var own: [TrackPoint] = []
+  var saved: [SavedTrack] = []
+}
+
+/// Projects points on the water onto the lens: across by bearing from where the wearer
+/// looks, down from the horizon by the dip angle atan(eye height / range).
+struct LensProjector {
+  let lat: Double, lon: Double, gaze: Double
+  let eyeHeightM: Double, horizonDeg: Double, ppd: Double
+
+  init(lat: Double, lon: Double, gaze: Double, settings s: HUDSettings) {
+    self.lat = lat; self.lon = lon; self.gaze = gaze
+    eyeHeightM = s.eyeHeightM; horizonDeg = s.horizonDeg; ppd = 600 / s.fovDeg
+  }
+
+  /// nm east and north of (fromLat, fromLon), flat-earth.
+  static func local(lat: Double, lon: Double, fromLat: Double, fromLon: Double) -> (x: Double, y: Double) {
+    ((lon - fromLon) * 60 * cos(fromLat * .pi / 180), (lat - fromLat) * 60)
+  }
+
+  static func onLens(_ p: LensPoint) -> Bool { p.x > -40 && p.x < 640 && p.y > -40 && p.y < 640 }
+
+  /// A point `dx`, `dy` nm east and north of the boat, or nil when it's right under
+  /// the boat or more than 75 degrees off the line of sight.
+  func project(_ dx: Double, _ dy: Double) -> LensPoint? {
+    let r = hypot(dx, dy)
+    guard r >= 0.004 else { return nil }
+    let rel = Geo.wrap180(atan2(dx, dy) * 180 / .pi - gaze)
+    guard abs(rel) <= 75 else { return nil }
+    let dip = atan(eyeHeightM / (r * 1852)) * 180 / .pi
+    return LensPoint(x: (300 + rel * ppd).rounded(), y: (300 + (dip + horizonDeg) * ppd).rounded())
+  }
+
+  func project(lat pLat: Double, lon pLon: Double) -> LensPoint? {
+    let d = Self.local(lat: pLat, lon: pLon, fromLat: lat, fromLon: lon)
+    return project(d.x, d.y)
+  }
+}
+
 /// An arrow at the edge of the lens for something important that is out of view.
 struct EdgeCue: Equatable, Sendable {
   var label: String
@@ -148,6 +203,7 @@ struct HUDFrame: Equatable, Sendable {
   var items: [HUDItem] = []
   var marks: [HUDMark] = []
   var route: HUDRoute?
+  var tracks: [HUDTrack] = []
   var edges: [EdgeCue] = []
   var alarmTitle: String?
   var alarmDetail: String?
@@ -177,6 +233,10 @@ struct HUDSettings: Equatable, Sendable {
   var animateRoute: Bool = true
   /// Rainbow animation steps per second.
   var routeAnimationFPS: Double = 4
+  /// Draw this boat's track and saved tracks on the water (Picture mode).
+  var showTracks: Bool = true
+  /// Leave out track points further away than this.
+  var trackRangeNm: Double = 6
   /// Target sources to leave out: "AIS", "ARPA". Collision alarms follow the same choice.
   var hiddenSources: Set<String> = []
 }
@@ -199,7 +259,8 @@ enum HUDBuilder {
     gaze: Double?,
     settings s: HUDSettings,
     acknowledged: Set<String> = [],
-    time: Double = 0
+    time: Double = 0,
+    tracks: TrackInput = TrackInput()
   ) -> HUDFrame {
     guard let snap = snapshot, let own = snap.own else { return .waiting }
     var f = HUDFrame()
@@ -258,6 +319,13 @@ enum HUDBuilder {
     if s.showRoute, let route = snap.route, let wps = route.waypoints, wps.count >= 2,
        let lat = own.lat, let lon = own.lon {
       f.route = routeLayer(route, waypoints: wps, lat: lat, lon: lon, gaze: gaze, settings: s, time: time)
+    }
+    if s.showTracks, let lat = own.lat, let lon = own.lon {
+      let lens = LensProjector(lat: lat, lon: lon, gaze: gaze, settings: s)
+      for t in tracks.saved {
+        if let h = trackLayer(t.points, style: .saved, lens: lens, rangeNm: s.trackRangeNm) { f.tracks.append(h) }
+      }
+      if let h = trackLayer(tracks.own, style: .own, lens: lens, rangeNm: s.trackRangeNm) { f.tracks.append(h) }
     }
 
     for t in allTargets {
@@ -320,6 +388,24 @@ enum HUDBuilder {
     return f
   }
 
+  /// A track as runs of lens points, like `drawTrackLine` in hud-demo.html. Points
+  /// beyond `rangeNm` are left out; nil when nothing of it is on the lens.
+  static func trackLayer(_ pts: [TrackPoint], style: TrackStyle, lens: LensProjector, rangeNm: Double) -> HUDTrack? {
+    var runs: [[LensPoint]] = []
+    var run: [LensPoint] = []
+    func endRun() {
+      if run.count >= 2, run.contains(where: LensProjector.onLens) { runs.append(run) }
+      run = []
+    }
+    for p in pts {
+      let d = LensProjector.local(lat: p.lat, lon: p.lon, fromLat: lens.lat, fromLon: lens.lon)
+      guard hypot(d.x, d.y) <= rangeNm, let q = lens.project(d.x, d.y) else { endRun(); continue }
+      if run.last != q { run.append(q) }   // far points collapse onto the same pixel
+    }
+    endRun()
+    return runs.isEmpty ? nil : HUDTrack(style: style, runs: runs)
+  }
+
   /// The route as a ribbon on the water, like `drawRoute` in hud-demo.html: legs between
   /// waypoints, 16 m either side of the track, sampled finely near the boat and coarsely
   /// far away, each sample's edges projected onto the lens. On an active route the legs
@@ -330,7 +416,7 @@ enum HUDBuilder {
     // Waypoints as nm east and north of the boat.
     let pts: [(x: Double, y: Double)?] = wps.map { w in
       guard let la = w.lat, let lo = w.lon else { return nil }
-      return ((lo - lon) * 60 * cos(lat * .pi / 180), (la - lat) * 60)
+      return LensProjector.local(lat: la, lon: lo, fromLat: lat, fromLon: lon)
     }
     // Active when TimeZero is steering to one of this route's waypoints.
     var next = route.nextIndex
@@ -338,16 +424,9 @@ enum HUDBuilder {
     let active = route.toWp != nil && next != nil && next! < wps.count
     let nextWp = active ? next! : -1
 
-    let ppd = 600 / s.fovDeg
-    func project(_ dx: Double, _ dy: Double) -> LensPoint? {
-      let r = hypot(dx, dy)
-      guard r >= 0.004 else { return nil }                 // right under you
-      let rel = Geo.wrap180(atan2(dx, dy) * 180 / .pi - gaze)
-      guard abs(rel) <= 75 else { return nil }              // behind your line of sight
-      let dip = atan(s.eyeHeightM / (r * 1852)) * 180 / .pi
-      return LensPoint(x: (300 + rel * ppd).rounded(), y: (300 + (dip + s.horizonDeg) * ppd).rounded())
-    }
-    func onLens(_ p: LensPoint) -> Bool { p.x > -40 && p.x < 640 && p.y > -40 && p.y < 640 }
+    let lens = LensProjector(lat: lat, lon: lon, gaze: gaze, settings: s)
+    func project(_ dx: Double, _ dy: Double) -> LensPoint? { lens.project(dx, dy) }
+    func onLens(_ p: LensPoint) -> Bool { LensProjector.onLens(p) }
 
     var out = HUDRoute(active: active)
     if active && s.animateRoute && s.routeAnimationFPS > 0 {

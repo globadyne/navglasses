@@ -102,6 +102,17 @@ struct SettingsView: View {
           Text("The route TimeZero is navigating lies on the water as a rainbow road; legs already sailed turn grey, and a route that isn't active shows as a dashed line. Picture mode only. Animating sends a new picture several times a second: turn it off if the glasses lag.")
         }
 
+        Section {
+          Toggle("Show tracks", isOn: $model.hud.showTracks)
+          Stepper("Within \(model.hud.trackRangeNm, specifier: "%.0f") nm",
+                  value: $model.hud.trackRangeNm, in: 1...20, step: 1)
+            .disabled(!model.hud.showTracks)
+        } header: {
+          Text("Tracks")
+        } footer: {
+          Text("Where this boat has been (amber) and saved tracks exported from TimeZero as GPX (blue, dotted), lying on the water. Picture mode only.")
+        }
+
         Section("TimeZero marks") {
           Toggle("Show marks", isOn: $model.hud.showMarks)
           Stepper("Within \(model.hud.markRangeNm, specifier: "%.0f") nm",

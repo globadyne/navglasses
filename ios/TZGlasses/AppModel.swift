@@ -36,6 +36,9 @@ final class AppModel {
   @ObservationIgnored private var lastPreviewAt = Date.distantPast
   @ObservationIgnored private var ackExpiry: [String: Date] = [:]
   @ObservationIgnored private let defaults = UserDefaults.standard
+  /// This boat's track: the bridge's recording (or the demo's), extended as the boat moves.
+  @ObservationIgnored private var ownTrack: [TrackPoint] = []
+  @ObservationIgnored private var ownTrackSeed = ""
 
   /// Call after `Wearables.configure()`.
   init() {
@@ -57,6 +60,8 @@ final class AppModel {
     if let v = d.object(forKey: "horizonDeg") as? Double { s.horizonDeg = v }
     if let v = d.object(forKey: "showRoute") as? Bool { s.showRoute = v }
     if let v = d.object(forKey: "animateRoute") as? Bool { s.animateRoute = v }
+    if let v = d.object(forKey: "showTracks") as? Bool { s.showTracks = v }
+    if let v = d.object(forKey: "trackRangeNm") as? Double { s.trackRangeNm = v }
     if let v = d.stringArray(forKey: "hiddenSources") { s.hiddenSources = Set(v) }
     hud = s
     head.reverseDirection = d.bool(forKey: "reverseDirection")
@@ -99,6 +104,8 @@ final class AppModel {
     defaults.set(hud.horizonDeg, forKey: "horizonDeg")
     defaults.set(hud.showRoute, forKey: "showRoute")
     defaults.set(hud.animateRoute, forKey: "animateRoute")
+    defaults.set(hud.showTracks, forKey: "showTracks")
+    defaults.set(hud.trackRangeNm, forKey: "trackRangeNm")
     defaults.set(Array(hud.hiddenSources), forKey: "hiddenSources")
   }
 
@@ -150,14 +157,42 @@ final class AppModel {
     acknowledged = Set(ackExpiry.keys)
   }
 
+  // MARK: Own track
+
+  /// Starts from the bridge's recorded track (it keeps recording while the app is closed)
+  /// and adds a point every 10 m or so between fetches.
+  private func recordOwnTrack(_ snap: BoatSnapshot?, _ userData: UserData?) {
+    let now = Date().timeIntervalSince1970
+    if let seed = userData?.ownTrack, !seed.isEmpty {
+      let key = "\(userData?.version ?? 0)-\(seed.count)-\(seed.last?.t ?? 0)"
+      if key != ownTrackSeed {
+        let seedEnd = seed.last?.t ?? now
+        ownTrack = seed + ownTrack.filter { ($0.t ?? 0) > seedEnd }
+        ownTrackSeed = key
+      }
+    }
+    guard let lat = snap?.own?.lat, let lon = snap?.own?.lon else { return }
+    if let last = ownTrack.last {
+      let d = LensProjector.local(lat: lat, lon: lon, fromLat: last.lat, fromLon: last.lon)
+      let nm = hypot(d.x, d.y)
+      if nm > 1 { ownTrack = []; ownTrackSeed = "" }   // jumped (demo restart, new position fix)
+      else if nm < 0.005 { return }
+    }
+    ownTrack.append(TrackPoint(lat: lat, lon: lon, t: now))
+    if ownTrack.count > 3000 { ownTrack = stride(from: 0, to: ownTrack.count, by: 2).map { ownTrack[$0] } }
+  }
+
   // MARK: Loop
 
   private func tick() async {
     refreshAcknowledged()
     let snap = bridge.snapshot
     let gaze = head.gaze(boatHeading: snap?.referenceHeading)
+    let userData = useDemoData ? demo.userData : bridge.userData
+    recordOwnTrack(snap, userData)
     let f = HUDBuilder.build(snapshot: snap, gaze: gaze, settings: hud, acknowledged: acknowledged,
-                             time: ProcessInfo.processInfo.systemUptime)
+                             time: ProcessInfo.processInfo.systemUptime,
+                             tracks: TrackInput(own: ownTrack, saved: userData?.tracks ?? []))
     frame = f
 
     let now = Date()
