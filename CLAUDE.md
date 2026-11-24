@@ -9,6 +9,7 @@ Head-tracked AR navigation labels for Meta Ray-Ban Display glasses, fed by TimeZ
 - `ios/tests/test_head_math.py`: Python mirror of `HeadMath.swift`; passes. Keep the two in step if you change either.
 - `android/`: Kotlin + Jetpack Compose port of the iOS app, written against Meta's Android DAT SDK 1.1.0 samples (DisplayAccess, BirdSpotter). `core/` (pure Kotlin: HeadMath, HudModel, BoatData/Json, DemoFeed) **compiles and passes `CoreChecks.kt`** (same head-math cases as the Python test, 20 seeds). The Android/Meta/Compose layers **have not been through Gradle yet** (Google Maven was blocked where it was written): sync in Android Studio and fix compile errors first.
 - **Three implementations of HeadMath** (Swift, Kotlin, Python test). Change all three together.
+- **Hardware: Meta Ray-Ban Display only.** Brilliant Labs Halo was considered and set aside (no gyroscope, so compass-only head tracking; 256 px drawable area).
 - Customers are in **Atlantic Canada: Nova Scotia, New Brunswick, PEI and Newfoundland**. Demo and examples use Halifax Harbour.
 
 ## First tasks
