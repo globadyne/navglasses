@@ -99,8 +99,82 @@ enum HUDImageRenderer {
     }
   }
 
+  /// HSL colour (as CSS `hsla`), so the rainbow matches hud-demo.html.
+  private static func hsl(_ h: Double, _ s: Double, _ l: Double, _ a: Double) -> UIColor {
+    let v = l + s * min(l, 1 - l)
+    let sv = v == 0 ? 0 : 2 * (1 - l / v)
+    var hue = h.truncatingRemainder(dividingBy: 360) / 360
+    if hue < 0 { hue += 1 }
+    return UIColor(hue: hue, saturation: sv, brightness: v, alpha: a)
+  }
+
+  private static func cg(_ p: LensPoint) -> CGPoint { CGPoint(x: p.x, y: p.y) }
+
+  /// The route lying on the water: rainbow road ahead on an active route, dashed lines
+  /// for the sailed part or a route that isn't being navigated, small waypoint diamonds.
+  private static func drawRoute(_ r: HUDRoute, in c: CGContext) {
+    func quad(_ pts: [LensPoint], _ fill: UIColor) {
+      c.setFillColor(fill.cgColor)
+      c.move(to: cg(pts[0])); pts.dropFirst().forEach { c.addLine(to: cg($0)) }; c.closePath(); c.fillPath()
+    }
+    // Dashed lines along the middle, joined so the dash pattern runs on unbroken.
+    for style in [RouteSegmentStyle.passed, .planned] {
+      var last: LensPoint?
+      for seg in r.segments where seg.style == style {
+        let a = LensPoint(x: (seg.al.x + seg.ar.x) / 2, y: (seg.al.y + seg.ar.y) / 2)
+        let b = LensPoint(x: (seg.bl.x + seg.br.x) / 2, y: (seg.bl.y + seg.br.y) / 2)
+        if last != a { c.move(to: cg(a)) }
+        c.addLine(to: cg(b))
+        last = b
+      }
+      let col = style == .passed ? UIColor(red: 0.55, green: 0.59, blue: 0.63, alpha: 0.45)
+                                 : UIColor(red: 0.88, green: 0.92, blue: 0.96, alpha: 0.6)
+      c.setStrokeColor(col.cgColor); c.setLineWidth(2.5); c.setLineDash(phase: 0, lengths: [12, 9])
+      c.strokePath()
+      c.setLineDash(phase: 0, lengths: [])
+    }
+    // Rainbow road: hue runs along the route and flows towards the boat over time.
+    for seg in r.segments where seg.style == .rainbow {
+      let hue = seg.alongNm / 0.12 * 360 - r.clock * 240
+      if let g = seg.glow { quad(g, hsl(hue, 1, 0.6, 0.12)) }
+      let fill = hsl(hue, 1, 0.62 + 0.08 * sin(r.clock * 6 + seg.alongNm * 40), 0.9)
+      // Far away the road lies almost flat on the horizon, a pixel or two thick. Keep it
+      // a visible coloured band there instead of just its edges.
+      let thick = max(abs(seg.al.y - seg.ar.y), abs(seg.bl.y - seg.br.y),
+                      hypot(seg.al.x - seg.ar.x, seg.al.y - seg.ar.y) * 0.3)
+      if thick < 5 {
+        c.setStrokeColor(fill.cgColor); c.setLineWidth(5); c.setLineCap(.round)
+        c.move(to: CGPoint(x: (seg.al.x + seg.ar.x) / 2, y: (seg.al.y + seg.ar.y) / 2))
+        c.addLine(to: CGPoint(x: (seg.bl.x + seg.br.x) / 2, y: (seg.bl.y + seg.br.y) / 2))
+        c.strokePath(); c.setLineCap(.butt)
+        continue
+      }
+      quad([seg.al, seg.bl, seg.br, seg.ar], fill)
+      c.setStrokeColor(UIColor(white: 1, alpha: 0.55).cgColor); c.setLineWidth(1.5)
+      c.move(to: cg(seg.al)); c.addLine(to: cg(seg.bl))
+      c.move(to: cg(seg.ar)); c.addLine(to: cg(seg.br))
+      c.strokePath()
+    }
+    // Waypoints other than the next one.
+    for w in r.waypoints {
+      let col = !r.active ? UIColor(red: 0.88, green: 0.92, blue: 0.96, alpha: 0.8)
+        : w.passed ? UIColor(red: 0.55, green: 0.59, blue: 0.63, alpha: 0.6) : UIColor.white
+      let x = w.at.x, y = w.at.y, d = 8.0
+      c.setStrokeColor(col.cgColor); c.setLineWidth(2)
+      c.move(to: CGPoint(x: x, y: y - d)); c.addLine(to: CGPoint(x: x + d, y: y))
+      c.addLine(to: CGPoint(x: x, y: y + d)); c.addLine(to: CGPoint(x: x - d, y: y)); c.closePath()
+      c.strokePath()
+      if !w.label.isEmpty {
+        text(w.label, at: CGPoint(x: x, y: y - 30), font: font(17), color: col, align: .center)
+      }
+    }
+  }
+
   private static func draw(_ f: HUDFrame, in c: CGContext) {
     let W = size.width, H = size.height
+
+    // Ground layer first, so labels draw over it.
+    if let route = f.route { drawRoute(route, in: c) }
 
     // Top strip: boat heading, gaze bearing, speed.
     text(f.headingText, at: CGPoint(x: 24, y: 20), font: font(28), color: hud)

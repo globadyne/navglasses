@@ -89,6 +89,50 @@ struct HUDMark: Equatable, Sendable {
   var rangeNm: Double
 }
 
+/// A point on the lens in pixels (0...600 across and down; may fall a little outside).
+struct LensPoint: Equatable, Sendable {
+  var x: Double
+  var y: Double
+}
+
+enum RouteSegmentStyle: Sendable {
+  /// Ahead of the boat on an active route: the rainbow road.
+  case rainbow
+  /// Already sailed (active route): grey dashed line.
+  case passed
+  /// Route not being navigated: thin pale dashed line.
+  case planned
+}
+
+/// One short piece of the route ribbon lying on the water.
+struct RouteSegment: Equatable, Sendable {
+  var style: RouteSegmentStyle
+  /// Left and right edges at the start (a) and end (b) of the piece.
+  var al: LensPoint, ar: LensPoint, bl: LensPoint, br: LensPoint
+  /// A wider glow band around rainbow pieces (al, bl, br, ar), when all its corners are in view.
+  var glow: [LensPoint]? = nil
+  /// Distance along the route at the end of the piece, nm. Sets the rainbow's colour.
+  var alongNm: Double
+}
+
+struct RouteWaypointMark: Equatable, Sendable {
+  /// Short name, or empty when it would crowd a nearby label.
+  var label: String
+  var at: LensPoint
+  var passed: Bool
+}
+
+/// The route drawn on the water (Picture mode only; Meta's text components can't draw lines).
+struct HUDRoute: Equatable, Sendable {
+  /// TimeZero is navigating this route.
+  var active: Bool
+  var segments: [RouteSegment] = []
+  var waypoints: [RouteWaypointMark] = []
+  /// Rainbow animation clock, seconds, stepped to the animation rate so frames only
+  /// change (and get sent) that often. 0 when the rainbow is still.
+  var clock: Double = 0
+}
+
 /// An arrow at the edge of the lens for something important that is out of view.
 struct EdgeCue: Equatable, Sendable {
   var label: String
@@ -103,6 +147,7 @@ struct HUDFrame: Equatable, Sendable {
   var gazeText: String = "---"
   var items: [HUDItem] = []
   var marks: [HUDMark] = []
+  var route: HUDRoute?
   var edges: [EdgeCue] = []
   var alarmTitle: String?
   var alarmDetail: String?
@@ -126,6 +171,12 @@ struct HUDSettings: Equatable, Sendable {
   var eyeHeightM: Double = 3
   /// Moves the horizon down (positive) or up (negative) in the lens, to line it up with the real one.
   var horizonDeg: Double = 0
+  /// Draw the route on the water (Picture mode).
+  var showRoute: Bool = true
+  /// Let the rainbow road flow. Each step is a new picture over Bluetooth; off sends a still rainbow.
+  var animateRoute: Bool = true
+  /// Rainbow animation steps per second.
+  var routeAnimationFPS: Double = 4
   /// Target sources to leave out: "AIS", "ARPA". Collision alarms follow the same choice.
   var hiddenSources: Set<String> = []
 }
@@ -147,7 +198,8 @@ enum HUDBuilder {
     snapshot: BoatSnapshot?,
     gaze: Double?,
     settings s: HUDSettings,
-    acknowledged: Set<String> = []
+    acknowledged: Set<String> = [],
+    time: Double = 0
   ) -> HUDFrame {
     guard let snap = snapshot, let own = snap.own else { return .waiting }
     var f = HUDFrame()
@@ -202,6 +254,11 @@ enum HUDBuilder {
       return ((0.5 + rel / s.fovDeg) * 120).rounded() / 120
     }
     func height(_ rangeNm: Double) -> Double { HUDBuilder.lensY(rangeNm: rangeNm, settings: s) }
+
+    if s.showRoute, let route = snap.route, let wps = route.waypoints, wps.count >= 2,
+       let lat = own.lat, let lon = own.lon {
+      f.route = routeLayer(route, waypoints: wps, lat: lat, lon: lon, gaze: gaze, settings: s, time: time)
+    }
 
     for t in allTargets {
       guard let x = place(t.bearing), let r = t.rangeNm else { continue }
@@ -261,6 +318,90 @@ enum HUDBuilder {
     }
     f.edges = Array(f.edges.prefix(3))
     return f
+  }
+
+  /// The route as a ribbon on the water, like `drawRoute` in hud-demo.html: legs between
+  /// waypoints, 16 m either side of the track, sampled finely near the boat and coarsely
+  /// far away, each sample's edges projected onto the lens. On an active route the legs
+  /// ahead of the boat are the rainbow road; the sailed part of the current leg and
+  /// earlier legs are grey.
+  static func routeLayer(_ route: RouteInfo, waypoints wps: [Waypoint], lat: Double, lon: Double,
+                         gaze: Double, settings s: HUDSettings, time: Double) -> HUDRoute {
+    // Waypoints as nm east and north of the boat.
+    let pts: [(x: Double, y: Double)?] = wps.map { w in
+      guard let la = w.lat, let lo = w.lon else { return nil }
+      return ((lo - lon) * 60 * cos(lat * .pi / 180), (la - lat) * 60)
+    }
+    // Active when TimeZero is steering to one of this route's waypoints.
+    var next = route.nextIndex
+    if next == nil, let to = route.toWp { next = wps.firstIndex { $0.name == to } }
+    let active = route.toWp != nil && next != nil && next! < wps.count
+    let nextWp = active ? next! : -1
+
+    let ppd = 600 / s.fovDeg
+    func project(_ dx: Double, _ dy: Double) -> LensPoint? {
+      let r = hypot(dx, dy)
+      guard r >= 0.004 else { return nil }                 // right under you
+      let rel = Geo.wrap180(atan2(dx, dy) * 180 / .pi - gaze)
+      guard abs(rel) <= 75 else { return nil }              // behind your line of sight
+      let dip = atan(s.eyeHeightM / (r * 1852)) * 180 / .pi
+      return LensPoint(x: (300 + rel * ppd).rounded(), y: (300 + (dip + s.horizonDeg) * ppd).rounded())
+    }
+    func onLens(_ p: LensPoint) -> Bool { p.x > -40 && p.x < 640 && p.y > -40 && p.y < 640 }
+
+    var out = HUDRoute(active: active)
+    if active && s.animateRoute && s.routeAnimationFPS > 0 {
+      out.clock = (time * s.routeAnimationFPS).rounded(.down) / s.routeAnimationFPS
+    }
+    let hw = 16.0 / 1852
+    var along = 0.0
+    for i in 0..<(wps.count - 1) {
+      guard let a = pts[i], let b = pts[i + 1] else { continue }
+      let len = hypot(b.x - a.x, b.y - a.y)
+      guard len > 1e-6 else { continue }
+      let ux = (b.x - a.x) / len, uy = (b.y - a.y) / len, nx = uy, ny = -ux
+      let live = active && i >= nextWp - 1
+      // On the leg being sailed, the part behind the boat is already done.
+      let sOwn = active && i == nextWp - 1 ? min(max(-(a.x * ux + a.y * uy), 0), len) : -1
+      var sPos = 0.0
+      var prev: (l: LensPoint?, r: LensPoint?, lw: LensPoint?, rw: LensPoint?)?
+      while true {
+        let px = a.x + ux * sPos, py = a.y + uy * sPos
+        let cur = (l: project(px + nx * hw, py + ny * hw), r: project(px - nx * hw, py - ny * hw),
+                   lw: project(px + nx * hw * 1.8, py + ny * hw * 1.8),
+                   rw: project(px - nx * hw * 1.8, py - ny * hw * 1.8))
+        if let p = prev, let pl = p.l, let pr = p.r, let cl = cur.l, let cr = cur.r,
+           [pl, pr, cl, cr].contains(where: onLens) {
+          let style: RouteSegmentStyle = live && sPos > sOwn ? .rainbow : (active ? .passed : .planned)
+          var seg = RouteSegment(style: style, al: pl, ar: pr, bl: cl, br: cr,
+                                 alongNm: ((along + sPos) * 1000).rounded() / 1000)
+          if style == .rainbow, let plw = p.lw, let prw = p.rw, let clw = cur.lw, let crw = cur.rw {
+            seg.glow = [plw, clw, crw, prw]
+          }
+          out.segments.append(seg)
+        }
+        prev = cur
+        if sPos >= len { break }
+        // Finer near the boat; never coarser than 0.04 nm so the rainbow (one cycle per
+        // 0.12 nm) shades smoothly instead of in blocks.
+        sPos = min(len, sPos + min(max(hypot(px, py) * 0.06, 0.003), 0.04))
+      }
+      along += len
+    }
+
+    // Small markers for the other waypoints (the next one gets a full label as an item).
+    // Far waypoints bunch up, so only the first of a cluster is named.
+    var namedX: [Double] = []
+    for (i, w) in wps.enumerated() {
+      guard let p = pts[i], let q = project(p.x, p.y), onLens(q), !(active && i == nextWp) else { continue }
+      var label = ""
+      if !namedX.contains(where: { abs($0 - q.x) < 56 }) {
+        label = String(shortName(w.name ?? "WP").split(separator: " ").first ?? "")
+        namedX.append(q.x)
+      }
+      out.waypoints.append(RouteWaypointMark(label: label, at: q, passed: active && i < nextWp))
+    }
+    return out
   }
 
   /// Height on the lens (0 = top, 1 = bottom) of a point on the water `rangeNm` away.

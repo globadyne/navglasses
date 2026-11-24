@@ -92,6 +92,16 @@ struct SettingsView: View {
                   value: $model.hud.cpaDangerNm, in: 0.05...2, step: 0.05)
         }
 
+        Section {
+          Toggle("Show route", isOn: $model.hud.showRoute)
+          Toggle("Animate rainbow road", isOn: $model.hud.animateRoute)
+            .disabled(!model.hud.showRoute)
+        } header: {
+          Text("Route")
+        } footer: {
+          Text("The route TimeZero is navigating lies on the water as a rainbow road; legs already sailed turn grey, and a route that isn't active shows as a dashed line. Picture mode only. Animating sends a new picture several times a second: turn it off if the glasses lag.")
+        }
+
         Section("TimeZero marks") {
           Toggle("Show marks", isOn: $model.hud.showMarks)
           Stepper("Within \(model.hud.markRangeNm, specifier: "%.0f") nm",

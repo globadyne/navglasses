@@ -55,6 +55,8 @@ final class AppModel {
     if let v = d.object(forKey: "showMarks") as? Bool { s.showMarks = v }
     if let v = d.object(forKey: "eyeHeightM") as? Double { s.eyeHeightM = v }
     if let v = d.object(forKey: "horizonDeg") as? Double { s.horizonDeg = v }
+    if let v = d.object(forKey: "showRoute") as? Bool { s.showRoute = v }
+    if let v = d.object(forKey: "animateRoute") as? Bool { s.animateRoute = v }
     if let v = d.stringArray(forKey: "hiddenSources") { s.hiddenSources = Set(v) }
     hud = s
     head.reverseDirection = d.bool(forKey: "reverseDirection")
@@ -95,6 +97,8 @@ final class AppModel {
     defaults.set(hud.showMarks, forKey: "showMarks")
     defaults.set(hud.eyeHeightM, forKey: "eyeHeightM")
     defaults.set(hud.horizonDeg, forKey: "horizonDeg")
+    defaults.set(hud.showRoute, forKey: "showRoute")
+    defaults.set(hud.animateRoute, forKey: "animateRoute")
     defaults.set(Array(hud.hiddenSources), forKey: "hiddenSources")
   }
 
@@ -152,7 +156,8 @@ final class AppModel {
     refreshAcknowledged()
     let snap = bridge.snapshot
     let gaze = head.gaze(boatHeading: snap?.referenceHeading)
-    let f = HUDBuilder.build(snapshot: snap, gaze: gaze, settings: hud, acknowledged: acknowledged)
+    let f = HUDBuilder.build(snapshot: snap, gaze: gaze, settings: hud, acknowledged: acknowledged,
+                             time: ProcessInfo.processInfo.systemUptime)
     frame = f
 
     let now = Date()

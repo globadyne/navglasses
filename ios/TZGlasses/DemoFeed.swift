@@ -18,7 +18,9 @@ struct DemoFeed {
   private var t = 0.0
   private var movers: [Mover] = []
   private var buoys: [(String, Double, Double)] = []
-  private var waypoint: (String, Double, Double) = ("WP4 HARBOUR MOUTH", 0, 0)
+  /// TimeZero route being navigated: (name, lat, lon), and the index of the waypoint steered to.
+  private var route: [(String, Double, Double)] = []
+  private var nextWp = 1
   private struct DemoMark { var name: String; var icon: String; var lat: Double; var lon: Double }
   private var marks: [DemoMark] = []
 
@@ -52,8 +54,13 @@ struct DemoFeed {
     ]
     let red = place(155, 1.2), green = place(170, 2.3)
     buoys = [("RED BUOY", red.0, red.1), ("GREEN BUOY", green.0, green.1)]
-    let wp = place(158, 4.0)
-    waypoint = ("WP4 HARBOUR MOUTH", wp.0, wp.1)
+    // Harbour run, as in hud-demo.html: WP3 just astern of the start, out through the harbour mouth.
+    let wp3 = place(340, 0.25), wp4 = place(158, 4.0)
+    let wp5 = Self.offset(wp4.0, wp4.1, bearing: 172, nm: 2.4)
+    let wp6 = Self.offset(wp5.0, wp5.1, bearing: 228, nm: 3.0)
+    route = [("WP3", wp3.0, wp3.1), ("WP4 HARBOUR MOUTH", wp4.0, wp4.1),
+             ("WP5 OUTER MARK", wp5.0, wp5.1), ("WP6 SAMBRO", wp6.0, wp6.1)]
+    nextWp = 1
     // TimeZero marks, as in hud-demo.html.
     let pots = place(149, 0.55), shoal = place(176, 1.45), anchorage = place(305, 0.7)
     marks = [
@@ -62,6 +69,30 @@ struct DemoFeed {
       DemoMark(name: "Shoal 2.1 m", icon: "danger", lat: shoal.0, lon: shoal.1),
       DemoMark(name: "Anchorage", icon: "anchor", lat: anchorage.0, lon: anchorage.1),
     ]
+  }
+
+  /// What the bridge sends while TimeZero navigates the route (RMB plus the route's waypoints).
+  /// Arriving within 0.1 nm moves on to the next waypoint; after the last, navigation stops.
+  private mutating func routeInfo() -> RouteInfo {
+    let wps = route.map { w -> Waypoint in
+      let (r, b) = Geo.rangeBearing(fromLat: ownLat, fromLon: ownLon, toLat: w.1, toLon: w.2)
+      return Waypoint(name: w.0, lat: w.1, lon: w.2, rangeNm: r, bearing: b)
+    }
+    if nextWp < wps.count, let r = wps[nextWp].rangeNm, r < 0.1 { nextWp += 1 }
+    guard nextWp < wps.count, nextWp >= 1 else {
+      return RouteInfo(routeName: "HARBOUR RUN", waypoints: wps)   // not navigating
+    }
+    // Cross-track error on the active leg: + = right of track, so steer left.
+    func local(_ w: Waypoint) -> (Double, Double) {
+      (((w.lon ?? 0) - ownLon) * 60 * cos(ownLat * .pi / 180), ((w.lat ?? 0) - ownLat) * 60)
+    }
+    let a = local(wps[nextWp - 1]), b = local(wps[nextWp])
+    let ux = b.0 - a.0, uy = b.1 - a.1, len = max(hypot(ux, uy), 1e-9)
+    let xte = -a.0 * (uy / len) + a.1 * (ux / len)
+    let to = wps[nextWp]
+    return RouteInfo(toWp: to.name, fromWp: wps[nextWp - 1].name, rangeNm: to.rangeNm, bearing: to.bearing,
+                     xteNm: abs(xte), steer: xte > 0 ? "L" : "R", routeName: "HARBOUR RUN",
+                     nextIndex: nextWp, waypoints: wps)
   }
 
   mutating func step(seconds dt: Double) -> BoatSnapshot {
@@ -96,9 +127,7 @@ struct DemoFeed {
     }
     snap.targets = targets
 
-    let (wr, wb) = Geo.rangeBearing(fromLat: ownLat, fromLon: ownLon, toLat: waypoint.1, toLon: waypoint.2)
-    snap.route = RouteInfo(toWp: waypoint.0, rangeNm: wr, bearing: wb, xteNm: abs(0.05 * sin(t / 25)),
-                           steer: sin(t / 25) > 0 ? "L" : "R")
+    snap.route = routeInfo()
     snap.marks = marks.map { m in
       let (r, b) = Geo.rangeBearing(fromLat: ownLat, fromLon: ownLon, toLat: m.lat, toLon: m.lon)
       return Mark(name: m.name, icon: LooseString(stringLiteral: m.icon), lat: m.lat, lon: m.lon, rangeNm: r, bearing: b)
