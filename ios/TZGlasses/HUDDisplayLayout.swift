@@ -58,6 +58,15 @@ enum HUDDisplayLayout {
         }
       }
 
+      // Marks fill any rows left (no icons or lines here, so one line of text each).
+      for m in f.marks.prefix(max(0, 4 - min(3, f.items.count))) {
+        FlexBox(direction: .row, crossAlignment: .center) {
+          FlexBox {}.flexGrow(Float(max(0.01, m.x)) * 100)
+          Text("\(m.title) \(m.detail)", style: .meta, color: .secondary)
+          FlexBox {}.flexGrow(Float(max(0.01, 1 - m.x)) * 100)
+        }
+      }
+
       FlexBox {}.flexGrow(1)
 
       // Things out of view.

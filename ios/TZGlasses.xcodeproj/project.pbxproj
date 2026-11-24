@@ -203,7 +203,7 @@
 				CODE_SIGN_ENTITLEMENTS = TZGlasses/TZGlasses.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = YP59H7P335;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = TZGlasses/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
@@ -212,7 +212,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.tzglasses.hud;
+				PRODUCT_BUNDLE_IDENTIFIER = com.keltonnickerson.tzglasses;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_STRICT_CONCURRENCY = minimal;
 				SWIFT_VERSION = 5.0;
@@ -228,7 +228,7 @@
 				CODE_SIGN_ENTITLEMENTS = TZGlasses/TZGlasses.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = YP59H7P335;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = TZGlasses/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
@@ -237,7 +237,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.tzglasses.hud;
+				PRODUCT_BUNDLE_IDENTIFIER = com.keltonnickerson.tzglasses;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_STRICT_CONCURRENCY = minimal;
 				SWIFT_VERSION = 5.0;

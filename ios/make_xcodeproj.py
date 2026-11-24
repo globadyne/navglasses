@@ -9,7 +9,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 APP = "TZGlasses"
 SRC = HERE / APP
-BUNDLE_ID = "com.tzglasses.hud"   # change to your own reverse-domain ID if signing complains
+BUNDLE_ID = "com.keltonnickerson.tzglasses"   # must be unique to your Apple team
+DEVELOPMENT_TEAM = "YP59H7P335"   # Kelton Nickerson (Personal Team); set to your own team ID
 SDK_VERSION = "1.1.0"
 PRODUCTS = ["MWDATCore", "MWDATDisplay", "MWDATMotion", "MWDATInputs", "MWDATMockDevice"]
 
@@ -40,7 +41,7 @@ target_settings = """
 				CODE_SIGN_ENTITLEMENTS = {app}/{app}.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = {team};
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = {app}/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
@@ -53,7 +54,7 @@ target_settings = """
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_STRICT_CONCURRENCY = minimal;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;""".format(app=APP, bid=BUNDLE_ID)
+				TARGETED_DEVICE_FAMILY = 1;""".format(app=APP, bid=BUNDLE_ID, team=DEVELOPMENT_TEAM)
 
 project_common = """
 				ALWAYS_SEARCH_USER_PATHS = NO;

@@ -49,12 +49,44 @@ struct HUDItem: Equatable, Sendable {
   var detail: String
   /// Horizontal position across the lens, 0 = left edge, 1 = right edge.
   var x: Double
+  /// Where the thing sits on the water, 0 = top of the lens, 1 = bottom (0.5 = horizon).
+  var y: Double = 0.5
   var rangeNm: Double
   var severity: Severity
   /// Waypoints sit on the horizon; vessels sit lower the closer they are.
   var isNextWaypoint: Bool = false
   /// Where a vessel came from: "AIS", "ARPA" (radar) or nil.
   var source: String? = nil
+}
+
+/// Symbol drawn for a TimeZero mark.
+enum MarkIcon: Sendable {
+  case fish, pots, danger, anchor, generic
+
+  /// Picks a symbol from the mark's GPX symbol, TimeZero icon and name. TimeZero's numeric
+  /// icon values aren't mapped yet (no real data seen), so a number alone gives `.generic`
+  /// and the name's keywords decide.
+  static func classify(symbol: String?, icon: String?, name: String?) -> MarkIcon {
+    for text in [symbol, icon, name] {
+      guard let t = text?.lowercased(), !t.isEmpty else { continue }
+      if ["fish"].contains(where: t.contains) { return .fish }
+      if ["pot", "trap", "lobster", "crab", "buoy line"].contains(where: t.contains) { return .pots }
+      if ["danger", "hazard", "shoal", "rock", "wreck", "obstruct", "reef", "ledge"].contains(where: t.contains) { return .danger }
+      if ["anchor"].contains(where: t.contains) { return .anchor }
+    }
+    return .generic
+  }
+}
+
+/// A TimeZero mark drawn on the water as an icon with a one-line label, as its own
+/// layer so marks don't push ship labels off the lens.
+struct HUDMark: Equatable, Sendable {
+  var title: String
+  var detail: String
+  var icon: MarkIcon
+  var x: Double
+  var y: Double
+  var rangeNm: Double
 }
 
 /// An arrow at the edge of the lens for something important that is out of view.
@@ -70,6 +102,7 @@ struct HUDFrame: Equatable, Sendable {
   var speedText: String = "--.- KN"
   var gazeText: String = "---"
   var items: [HUDItem] = []
+  var marks: [HUDMark] = []
   var edges: [EdgeCue] = []
   var alarmTitle: String?
   var alarmDetail: String?
@@ -88,6 +121,11 @@ struct HUDSettings: Equatable, Sendable {
   var tcpaLimitMin: Double = 20
   var markRangeNm: Double = 5
   var showMarks: Bool = true
+  var maxMarks: Int = 5
+  /// Height of the wearer's eyes above the water. Sets how far below the horizon things sit.
+  var eyeHeightM: Double = 3
+  /// Moves the horizon down (positive) or up (negative) in the lens, to line it up with the real one.
+  var horizonDeg: Double = 0
   /// Target sources to leave out: "AIS", "ARPA". Collision alarms follow the same choice.
   var hiddenSources: Set<String> = []
 }
@@ -163,6 +201,7 @@ enum HUDBuilder {
       // Snap to 1/120 of the lens (5 px) so sensor jitter doesn't trigger a resend.
       return ((0.5 + rel / s.fovDeg) * 120).rounded() / 120
     }
+    func height(_ rangeNm: Double) -> Double { HUDBuilder.lensY(rangeNm: rangeNm, settings: s) }
 
     for t in allTargets {
       guard let x = place(t.bearing), let r = t.rangeNm else { continue }
@@ -175,26 +214,31 @@ enum HUDBuilder {
           let sog = t.sog.map { String(format: " · %.0f KN", $0) } ?? ""
           detail = String(format: "%.1f NM", r) + sog
         }
-        candidates.append(HUDItem(kind: .vessel, title: displayName(t), detail: detail, x: x, rangeNm: r,
-                                  severity: sev, source: sourceKey(t)))
+        candidates.append(HUDItem(kind: .vessel, title: displayName(t), detail: detail, x: x, y: height(r),
+                                  rangeNm: r, severity: sev, source: sourceKey(t)))
       } else {
         candidates.append(HUDItem(kind: .aton, title: shortName(t.name), detail: String(format: "%.1f NM", r),
-                                  x: x, rangeNm: r, severity: .normal))
+                                  x: x, y: height(r), rangeNm: r, severity: .normal))
       }
     }
 
+    // TimeZero marks: their own layer, nearest first.
     if s.showMarks {
+      var marks: [HUDMark] = []
       for m in snap.marks ?? [] {
         guard let r = m.rangeNm, r <= s.markRangeNm, let x = place(m.bearing) else { continue }
-        candidates.append(HUDItem(kind: .mark, title: m.name.map { shortName($0) } ?? "MARK",
-                                  detail: String(format: "%.1f NM", r), x: x, rangeNm: r, severity: .normal))
+        marks.append(HUDMark(title: m.name.map { shortName($0) } ?? "MARK", detail: String(format: "%.1f", r),
+                             icon: MarkIcon.classify(symbol: m.symbol, icon: m.icon?.value, name: m.name),
+                             x: x, y: height(r), rangeNm: r))
       }
+      marks.sort { $0.rangeNm < $1.rangeNm }
+      f.marks = Array(marks.prefix(s.maxMarks))
     }
 
     // Next waypoint: from the live route, else the route's waypoint list.
     if let route = snap.route, let wpName = route.toWp, let x = place(route.bearing), let r = route.rangeNm {
       candidates.append(HUDItem(kind: .waypoint, title: wpName.uppercased(), detail: String(format: "%.1f NM", r),
-                                x: x, rangeNm: r, severity: .normal, isNextWaypoint: true))
+                                x: x, y: height(r), rangeNm: r, severity: .normal, isNextWaypoint: true))
     }
 
     // Most important first: alarms, then the next waypoint, then nearest.
@@ -217,6 +261,16 @@ enum HUDBuilder {
     }
     f.edges = Array(f.edges.prefix(3))
     return f
+  }
+
+  /// Height on the lens (0 = top, 1 = bottom) of a point on the water `rangeNm` away.
+  /// It sits below the horizon by the dip angle atan(eye height / range): far things hug
+  /// the horizon, near things sit low. Snapped to 5 px so a moving boat doesn't force a
+  /// resend every tick.
+  static func lensY(rangeNm: Double, settings s: HUDSettings) -> Double {
+    let dipDeg = atan(s.eyeHeightM / max(rangeNm * 1852, 1)) * 180 / .pi
+    let y = 0.5 + (dipDeg + s.horizonDeg) / s.fovDeg
+    return (y * 120).rounded() / 120
   }
 
   /// "ARPA" for radar-tracked targets, otherwise "AIS" (AIS messages, AIS via TTM, or unknown TTM).

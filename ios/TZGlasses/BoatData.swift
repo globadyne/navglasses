@@ -82,8 +82,24 @@ struct Target: Decodable, Sendable {
 struct Mark: Decodable, Sendable {
   var name: String?
   var note: String?
+  /// GPX `<sym>` (e.g. "Fishing Area"), when the mark came from a GPX file.
+  var symbol: String?
+  /// TimeZero's icon: a number from UserObjects.tzdb, or a name from the demo.
+  var icon: LooseString?
   var lat: Double?
   var lon: Double?
   var rangeNm: Double?
   var bearing: Double?
+}
+
+/// A JSON value that may arrive as a string or a number; kept as text.
+struct LooseString: Decodable, Sendable, ExpressibleByStringLiteral {
+  var value: String
+  init(stringLiteral value: String) { self.value = value }
+  init(from decoder: Decoder) throws {
+    let c = try decoder.singleValueContainer()
+    if let s = try? c.decode(String.self) { value = s }
+    else if let i = try? c.decode(Int.self) { value = String(i) }
+    else { value = String(try c.decode(Double.self)) }
+  }
 }
