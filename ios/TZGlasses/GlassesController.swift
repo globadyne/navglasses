@@ -142,6 +142,14 @@ final class GlassesController {
     requiresGlassesAppUpdate = false
     do {
       let selector = AutoDeviceSelector(wearables: wearables, filter: { $0.supportsDisplay() })
+      // The selector only picks a device once it reports as connected, which arrives
+      // asynchronously (real glasses and MockDeviceKit alike). Creating the session
+      // before then fails with .noEligibleDevice, so wait briefly for a device.
+      guard await Self.waitForActiveDevice(selector, timeout: .seconds(10)) else {
+        teardown()
+        phase = .failed("No glasses found. Check they're on, worn and connected in Meta AI.")
+        return
+      }
       let session = try wearables.createSession(deviceSelector: selector)
       self.session = session
 
@@ -188,6 +196,24 @@ final class GlassesController {
     } catch {
       teardown()
       phase = .failed("Couldn't connect: \(error.localizedDescription)")
+    }
+  }
+
+  /// True once `selector` has an active device, or false after `timeout`.
+  private static func waitForActiveDevice(_ selector: AutoDeviceSelector, timeout: Duration) async -> Bool {
+    if selector.activeDevice != nil { return true }
+    return await withTaskGroup(of: Bool.self) { group in
+      group.addTask {
+        for await device in selector.activeDeviceStream() where device != nil { return true }
+        return false
+      }
+      group.addTask {
+        try? await Task.sleep(for: timeout)
+        return false
+      }
+      let found = await group.next() ?? false
+      group.cancelAll()
+      return found
     }
   }
 

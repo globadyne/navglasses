@@ -5,7 +5,7 @@ Head-tracked AR navigation labels for Meta Ray-Ban Display glasses, fed by TimeZ
 ## Status (handed over from a Claude chat session, 2026-11-23)
 
 - `bridge/`: Python, tested end to end (UDP, serial, TimeZero database, GPX, WebSocket). Runs on the user's Windows 11 nav PC next to TimeZero Professional **v4**.
-- `ios/`: written against the **real** Meta DAT SDK 1.1.0 interface files (`.swiftinterface` in the xcframeworks), following Meta's DisplayAccess sample. **It has not been compiled yet**: no Swift toolchain was available where it was written. The first job is to build it and fix any compile errors.
+- `ios/`: written against the **real** Meta DAT SDK 1.1.0 interface files (`.swiftinterface` in the xcframeworks), following Meta's DisplayAccess sample. **Builds and runs in the iOS Simulator** (Xcode 27.2, 2026-11-24): demo data, simulated glasses, Connect, Motion and Gestures all work there. Not yet run on a real iPhone or real glasses.
 - `ios/tests/test_head_math.py`: Python mirror of `HeadMath.swift`; passes. Keep the two in step if you change either.
 - `android/`: Kotlin + Jetpack Compose port of the iOS app, written against Meta's Android DAT SDK 1.1.0 samples (DisplayAccess, BirdSpotter). `core/` (pure Kotlin: HeadMath, HudModel, BoatData/Json, DemoFeed) **compiles and passes `CoreChecks.kt`** (same head-math cases as the Python test, 20 seeds). The Android/Meta/Compose layers **have not been through Gradle yet** (Google Maven was blocked where it was written): sync in Android Studio and fix compile errors first.
 - **Three implementations of HeadMath** (Swift, Kotlin, Python test). Change all three together.

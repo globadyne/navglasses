@@ -146,16 +146,18 @@ struct ContentView: View {
   // MARK: Head
 
   private var headControls: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    // `model.head` is a `let` reference to an @Observable class, so bind through @Bindable.
+    @Bindable var head = model.head
+    return VStack(alignment: .leading, spacing: 12) {
       Text("Head direction").font(.headline)
-      Picker("Source", selection: $model.head.source) {
+      Picker("Source", selection: $head.source) {
         ForEach(HeadSource.allCases) { Text($0.label).tag($0) }
       }
       .pickerStyle(.segmented)
       .onChange(of: head.source) { model.saveHeadSettings() }
 
       if head.source == .manual {
-        Slider(value: $model.head.manualTurnDeg, in: -180...180, step: 1)
+        Slider(value: $head.manualTurnDeg, in: -180...180, step: 1)
         Text(manualText).font(.subheadline).foregroundStyle(.secondary)
       } else if head.source == .phone {
         Text("Hold the phone upright and point it like you're looking. Tap Re-center while pointing at the bow.")
