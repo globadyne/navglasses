@@ -22,7 +22,7 @@ Examples
   python tz_bridge.py --udp 10110
   python tz_bridge.py --tcp 192.168.1.50:10110
   python tz_bridge.py --replay sample.nmea
-  python tz_bridge.py --udp 10110 --tzdb "C:\ProgramData\TimeZero\DATA\UserObjects.tzdb"
+  python tz_bridge.py --udp 10110 --tzdb "C:\ProgramData\TimeZero\DATA\UserObjects.tzdb"   (marks, routes and tracks, live)
   python tz_bridge.py --udp 10110 --record tz-test.nmea   (save what TimeZero sends)
   python tz_bridge.py --serial COM10 --gpx "C:\Users\me\Documents\TZ Export"
 """
@@ -335,6 +335,96 @@ class UserData:
         return True
 
 
+# ---------------------------------------------------------------- TimeZero tracks
+# Tracks2.tzdb (SQLite, next to UserObjects.tzdb). Each track is split into Portions;
+# each portion's HighResBlob holds its points in Web Mercator metres:
+#   byte 0       format (4 = 1 byte per component, 7/8 = 2 bytes)
+#   bytes 1-2    point count n (little-endian), not counting the start point
+#   bytes 3-34   8 floats: (min, max) scale for x steps, an unused pair, y steps, unused
+#   bytes 35-42  start x (double);  43-50 unused (double);  51-58 start y (double)
+#   then n points of 3 components (x step, unused, y step), each an unsigned integer
+#   q scaled to min + q / qmax * (max - min) and added to the previous point.
+# Decoded against Portions' bounding boxes (within 4 cm) on a real TimeZero 4 file.
+# MobileDescriptions.MobileType 0 is this boat; others are AIS/ARPA targets it logged.
+MERC_R = 6378137.0
+
+
+def merc_to_latlon(x, y):
+    return (math.degrees(2 * math.atan(math.exp(y / MERC_R)) - math.pi / 2), math.degrees(x / MERC_R))
+
+
+def latlon_to_merc(lat, lon):
+    return (math.radians(lon) * MERC_R, MERC_R * math.log(math.tan(math.pi / 4 + math.radians(lat) / 2)))
+
+
+def tz_track_points(blob):
+    """Web Mercator (x, y) points of one Portions.HighResBlob."""
+    if not blob or len(blob) < 59:
+        return []
+    n = struct.unpack_from("<H", blob, 1)[0]
+    f = struct.unpack_from("<8f", blob, 3)
+    x = struct.unpack_from("<d", blob, 35)[0]
+    y = struct.unpack_from("<d", blob, 51)[0]
+    pts = [(x, y)]
+    tail = blob[59:]
+    if n == 0 or len(tail) < 3 * n or len(tail) % (3 * n):
+        return pts
+    w = len(tail) // (3 * n)
+    qmax = (1 << (8 * w)) - 1
+    sx, sy = (f[1] - f[0]) / qmax, (f[5] - f[4]) / qmax
+    for k in range(n):
+        o = 3 * w * k
+        x += f[0] + int.from_bytes(tail[o:o + w], "little") * sx
+        y += f[4] + int.from_bytes(tail[o + 2 * w:o + 3 * w], "little") * sy
+        pts.append((x, y))
+    return pts
+
+
+def load_tz_tracks(path, lat, lon, radius_nm, max_points, min_step_m=15.0):
+    """This boat's tracks from TimeZero's Tracks2.tzdb within radius_nm of (lat, lon),
+    newest first, as runs of points about min_step_m apart, at most max_points in all.
+    Read-only, so it's safe while TimeZero is running."""
+    cx, cy = latlon_to_merc(lat, lon)
+    r = radius_nm * 1852 / math.cos(math.radians(lat))   # Mercator metres stretch with latitude
+    uri = Path(path).resolve().as_uri() + "?mode=ro"
+    con = sqlite3.connect(uri, uri=True, timeout=5)
+    try:
+        con.execute("PRAGMA query_only = ON")
+        rows = con.execute(
+            "SELECT t.FID, t.Name, t.Guid, p.HighResBlob FROM Portions p "
+            "JOIN Tracks t ON t.FID = p.FK_Tracks "
+            "LEFT JOIN MobileDescriptions m ON m.FID = t.FK_MobileDescription "
+            "WHERE p.Obsolete = 0 AND t.Obsolete = 0 AND (m.MobileType IS NULL OR m.MobileType = 0) "
+            "AND p.BbRight >= ? AND p.BbLeft <= ? AND p.BbTop >= ? AND p.BbBottom <= ? "
+            "ORDER BY t.DateMax DESC, t.FID, p.DateMin", (cx - r, cx + r, cy - r, cy + r)).fetchall()
+    finally:
+        con.close()
+    out, total, run, last = [], 0, None, None
+    r2 = r * r
+    for fid, name, guid, blob in rows:
+        if run is None or run["fid"] != fid:
+            if run and len(run["points"]) >= 2:
+                out.append(run)
+            run, last = {"fid": fid, "name": name or "Track", "id": guid.hex() if guid else str(fid), "points": []}, None
+        for x, y in tz_track_points(blob):
+            if (x - cx) ** 2 + (y - cy) ** 2 > r2:
+                if len(run["points"]) >= 2:      # left the area: end this run, start another
+                    out.append(run)
+                run = {**run, "points": []}; last = None
+                continue
+            if last and (x - last[0]) ** 2 + (y - last[1]) ** 2 < min_step_m ** 2:
+                continue
+            la, lo = merc_to_latlon(x, y)
+            run["points"].append({"lat": round(la, 6), "lon": round(lo, 6)})
+            last = (x, y)
+            total += 1
+        if total >= max_points:
+            break
+    if run and len(run["points"]) >= 2:
+        out.append(run)
+    return [{"name": t["name"], "id": t["id"], "points": t["points"], "source": "TimeZero"} for t in out]
+
+
 # ---------------------------------------------------------------- state
 class BoatState:
     def __init__(self):
@@ -347,6 +437,8 @@ class BoatState:
         self.sentence_counts = {}
         self.last_rx = None
         self.user = UserData([])
+        # TimeZero's own tracks near the boat (Tracks2.tzdb), refreshed by refresh_tz_tracks().
+        self.tz_tracks, self.tz_tracks_key, self.tz_tracks_version = [], None, 0.0
         self.mark_range = 10.0
         self.own_track = []
         self.nmea_wpts = {}          # name -> {lat, lon} from WPL
@@ -692,7 +784,7 @@ class BoatState:
             "route": route,
             "targets": targets,
             "marks": marks,
-            "userdata_version": self.user.version,
+            "userdata_version": max(self.user.version, self.tz_tracks_version),
             "stats": {**self.stats, "sentences": self.sentence_counts,
                       "marks_loaded": len(self.user.marks), "routes_loaded": len(self.user.routes),
                       "tracks_loaded": len(self.user.tracks), "gpx_errors": self.user.errors},
@@ -707,9 +799,24 @@ class BoatState:
             out["rel_bearing"] = round(((brg - ref_hdg + 540) % 360) - 180, 1)
         return out
 
+    def tz_tracks_due(self, path):
+        """The cache key for TimeZero's tracks near the boat if it changed (the file was
+        saved, or the boat moved about half a mile), else None."""
+        lat, lon = self.own.get("lat"), self.own.get("lon")
+        if lat is None or lon is None:
+            return None
+        mt = []
+        for suffix in ("", "-wal"):
+            try:
+                mt.append(Path(str(path) + suffix).stat().st_mtime)
+            except OSError:
+                pass
+        key = (tuple(mt), round(lat * 120), round(lon * 120 * math.cos(math.radians(lat))))
+        return None if key == self.tz_tracks_key else key
+
     def userdata(self):
-        return {"version": self.user.version, "marks": self.user.marks, "routes": self.user.routes,
-                "tracks": self.user.tracks, "own_track": self.own_track,
+        return {"version": max(self.user.version, self.tz_tracks_version), "marks": self.user.marks, "routes": self.user.routes,
+                "tracks": self.user.tracks + self.tz_tracks, "own_track": self.own_track,
                 "active_route": self.user.active_route,
                 "files": [f.name for f in self.user.mtimes], "errors": self.user.errors}
 
@@ -850,6 +957,29 @@ async def main_async(args):
                 await asyncio.sleep(5)
         asyncio.create_task(watch_gpx())
 
+    tz_tracks = args.tz_tracks
+    if not tz_tracks and args.tzdb and (Path(args.tzdb).parent / "Tracks2.tzdb").exists():
+        tz_tracks = str(Path(args.tzdb).parent / "Tracks2.tzdb")
+    if tz_tracks:
+        log.info("Reading TimeZero tracks from %s (within %g nm of the boat)", tz_tracks, args.tz_track_range)
+
+        async def watch_tz_tracks():
+            while True:
+                key = state.tz_tracks_due(tz_tracks)
+                if key:
+                    lat, lon = state.own["lat"], state.own["lon"]
+                    try:
+                        tracks = await loop.run_in_executor(
+                            None, load_tz_tracks, tz_tracks, lat, lon, args.tz_track_range, args.tz_track_points)
+                        state.tz_tracks, state.tz_tracks_key = tracks, key
+                        state.tz_tracks_version = time.time()
+                        log.info("TimeZero tracks: %d runs, %d points near the boat",
+                                 len(tracks), sum(len(t["points"]) for t in tracks))
+                    except (sqlite3.Error, OSError) as e:
+                        log.warning("Couldn't read %s (will retry): %s", tz_tracks, e)  # TimeZero mid-write
+                await asyncio.sleep(5)
+        asyncio.create_task(watch_tz_tracks())
+
     fwd = None
     if args.forward_udp:
         host, port = args.forward_udp.rsplit(":", 1)
@@ -916,6 +1046,10 @@ def main():
     p.add_argument("--gpx", action="append",
                    help="GPX file or folder exported from TimeZero (marks, routes, tracks); repeatable")
     p.add_argument("--tzdb", help="TimeZero UserObjects.tzdb to read marks and routes from (read-only)")
+    p.add_argument("--tz-tracks", help="TimeZero Tracks2.tzdb to read this boat's tracks from (read-only); "
+                                       "found automatically next to --tzdb")
+    p.add_argument("--tz-track-range", type=float, default=10.0, help="send TimeZero tracks within this many nm")
+    p.add_argument("--tz-track-points", type=int, default=20000, help="at most this many TimeZero track points")
     p.add_argument("--mark-range", type=float, default=10.0, help="send marks within this many nm")
     p.add_argument("--port", type=int, default=8080, help="HTTP/WebSocket port")
     p.add_argument("--interval", type=float, default=0.5, help="seconds between live updates")

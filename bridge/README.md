@@ -188,3 +188,11 @@ The bridge runs as normal and also saves every sentence it receives to `tz-test.
 ```
 python tz_bridge.py --replay tz-test.nmea
 ```
+
+## TimeZero's own tracks, live
+
+With `--tzdb`, the bridge also reads `Tracks2.tzdb` from the same folder (`C:\ProgramData\TimeZero\DATA\`), so tracks
+need no GPX export. It sends this boat's tracks within 10 nm of where the boat is (newest first, a point every 15 m or
+so, at most 20,000 points), and refreshes them when TimeZero saves or the boat moves about half a mile. Tracks of other
+boats that TimeZero logged are left out. Change the area or limit with `--tz-track-range` and `--tz-track-points`, or
+point at another file with `--tz-tracks`.
