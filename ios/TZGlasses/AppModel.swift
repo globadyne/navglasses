@@ -53,6 +53,8 @@ final class AppModel {
     if let v = d.object(forKey: "cpaDangerNm") as? Double { s.cpaDangerNm = v }
     if let v = d.object(forKey: "markRangeNm") as? Double { s.markRangeNm = v }
     if let v = d.object(forKey: "showMarks") as? Bool { s.showMarks = v }
+    if let v = d.object(forKey: "eyeHeightM") as? Double { s.eyeHeightM = v }
+    if let v = d.object(forKey: "horizonDeg") as? Double { s.horizonDeg = v }
     if let v = d.stringArray(forKey: "hiddenSources") { s.hiddenSources = Set(v) }
     hud = s
     head.reverseDirection = d.bool(forKey: "reverseDirection")
@@ -91,6 +93,8 @@ final class AppModel {
     defaults.set(hud.cpaDangerNm, forKey: "cpaDangerNm")
     defaults.set(hud.markRangeNm, forKey: "markRangeNm")
     defaults.set(hud.showMarks, forKey: "showMarks")
+    defaults.set(hud.eyeHeightM, forKey: "eyeHeightM")
+    defaults.set(hud.horizonDeg, forKey: "horizonDeg")
     defaults.set(Array(hud.hiddenSources), forKey: "hiddenSources")
   }
 

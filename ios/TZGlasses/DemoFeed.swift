@@ -19,6 +19,8 @@ struct DemoFeed {
   private var movers: [Mover] = []
   private var buoys: [(String, Double, Double)] = []
   private var waypoint: (String, Double, Double) = ("WP4 HARBOUR MOUTH", 0, 0)
+  private struct DemoMark { var name: String; var icon: String; var lat: Double; var lon: Double }
+  private var marks: [DemoMark] = []
 
   init() { reset() }
 
@@ -52,6 +54,14 @@ struct DemoFeed {
     buoys = [("RED BUOY", red.0, red.1), ("GREEN BUOY", green.0, green.1)]
     let wp = place(158, 4.0)
     waypoint = ("WP4 HARBOUR MOUTH", wp.0, wp.1)
+    // TimeZero marks, as in hud-demo.html.
+    let pots = place(149, 0.55), shoal = place(176, 1.45), anchorage = place(305, 0.7)
+    marks = [
+      DemoMark(name: "Fishing spot", icon: "fish", lat: 44.6010, lon: -63.5415),
+      DemoMark(name: "Lobster pots", icon: "pots", lat: pots.0, lon: pots.1),
+      DemoMark(name: "Shoal 2.1 m", icon: "danger", lat: shoal.0, lon: shoal.1),
+      DemoMark(name: "Anchorage", icon: "anchor", lat: anchorage.0, lon: anchorage.1),
+    ]
   }
 
   mutating func step(seconds dt: Double) -> BoatSnapshot {
@@ -89,8 +99,10 @@ struct DemoFeed {
     let (wr, wb) = Geo.rangeBearing(fromLat: ownLat, fromLon: ownLon, toLat: waypoint.1, toLon: waypoint.2)
     snap.route = RouteInfo(toWp: waypoint.0, rangeNm: wr, bearing: wb, xteNm: abs(0.05 * sin(t / 25)),
                            steer: sin(t / 25) > 0 ? "L" : "R")
-    let (mr, mb) = Geo.rangeBearing(fromLat: ownLat, fromLon: ownLon, toLat: 44.6010, toLon: -63.5415)
-    snap.marks = [Mark(name: "Fishing spot", lat: 44.6010, lon: -63.5415, rangeNm: mr, bearing: mb)]
+    snap.marks = marks.map { m in
+      let (r, b) = Geo.rangeBearing(fromLat: ownLat, fromLon: ownLon, toLat: m.lat, toLon: m.lon)
+      return Mark(name: m.name, icon: LooseString(stringLiteral: m.icon), lat: m.lat, lon: m.lon, rangeNm: r, bearing: b)
+    }
     return snap
   }
 }

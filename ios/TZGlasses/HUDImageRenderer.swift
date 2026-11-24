@@ -17,6 +17,8 @@ enum HUDImageRenderer {
   private static let red = UIColor(red: 1.0, green: 0.49, blue: 0.43, alpha: 1)
   /// Radar (ARPA) targets, so they read differently from AIS ones.
   private static let arpa = UIColor(red: 1.0, green: 0.70, blue: 0.36, alpha: 1)
+  /// TimeZero marks: violet, so they read apart from targets.
+  private static let markColor = UIColor(red: 0.77, green: 0.61, blue: 1.0, alpha: 1)
 
   private static func color(_ s: Severity) -> UIColor {
     switch s {
@@ -60,6 +62,43 @@ enum HUDImageRenderer {
     ns.draw(at: origin, withAttributes: attrs)
   }
 
+  private static func textWidth(_ s: String, _ font: UIFont) -> CGFloat {
+    (s as NSString).size(withAttributes: [.font: font]).width
+  }
+
+  /// Mark icons, same shapes as `markIcon` in hud-demo.html. `p` is where the mark sits on the water.
+  private static func drawMarkIcon(_ icon: MarkIcon, at p: CGPoint, in c: CGContext) {
+    let x = p.x, y = p.y
+    c.setStrokeColor(markColor.cgColor)
+    c.setFillColor(markColor.cgColor)
+    c.setLineWidth(2.5)
+    switch icon {
+    case .fish:
+      c.strokeEllipse(in: CGRect(x: x - 13, y: y - 6, width: 22, height: 12))
+      c.move(to: CGPoint(x: x + 8, y: y)); c.addLine(to: CGPoint(x: x + 16, y: y - 6))
+      c.addLine(to: CGPoint(x: x + 16, y: y + 6)); c.closePath(); c.strokePath()
+    case .pots:
+      c.strokeEllipse(in: CGRect(x: x - 6, y: y - 4, width: 12, height: 12))
+      c.move(to: CGPoint(x: x, y: y - 4)); c.addLine(to: CGPoint(x: x, y: y - 18)); c.strokePath()
+      c.move(to: CGPoint(x: x, y: y - 18)); c.addLine(to: CGPoint(x: x + 10, y: y - 14))
+      c.addLine(to: CGPoint(x: x, y: y - 10)); c.closePath(); c.fillPath()
+    case .danger:
+      c.strokeEllipse(in: CGRect(x: x - 11, y: y - 11, width: 22, height: 22))
+      c.move(to: CGPoint(x: x - 6, y: y - 6)); c.addLine(to: CGPoint(x: x + 6, y: y + 6))
+      c.move(to: CGPoint(x: x + 6, y: y - 6)); c.addLine(to: CGPoint(x: x - 6, y: y + 6)); c.strokePath()
+    case .anchor:
+      c.strokeEllipse(in: CGRect(x: x - 3.5, y: y - 14.5, width: 7, height: 7))
+      c.move(to: CGPoint(x: x, y: y - 7)); c.addLine(to: CGPoint(x: x, y: y + 10))
+      c.move(to: CGPoint(x: x - 7, y: y - 3)); c.addLine(to: CGPoint(x: x + 7, y: y - 3))
+      c.move(to: CGPoint(x: x - 10, y: y + 2))
+      c.addQuadCurve(to: CGPoint(x: x, y: y + 11), control: CGPoint(x: x - 9, y: y + 11))
+      c.addQuadCurve(to: CGPoint(x: x + 10, y: y + 2), control: CGPoint(x: x + 9, y: y + 11))
+      c.strokePath()
+    case .generic:
+      c.strokeEllipse(in: CGRect(x: x - 8, y: y - 8, width: 16, height: 16))
+    }
+  }
+
   private static func draw(_ f: HUDFrame, in c: CGContext) {
     let W = size.width, H = size.height
 
@@ -75,46 +114,88 @@ enum HUDImageRenderer {
       text(msg, at: CGPoint(x: W / 2, y: H / 2 - 16), font: labelFont(30), color: hud, align: .center)
     }
 
-    // Labels. Waypoints sit on the horizon line; vessels, buoys and marks below it,
-    // nearer things lower. Labels that would overlap step down a row.
-    let horizon: CGFloat = 250
+    // Labels. The marker sits where the thing is on the water (below the horizon by
+    // its dip angle); the text sits above it. Nearest are placed first; labels that
+    // would overlap step up, with a leader line down to their marker.
     var placed: [CGRect] = []
-    for item in f.items.sorted(by: { $0.x < $1.x }) {
+    // Keep the edge cues' rows clear (they're drawn later, from y = 96, 30 px apart).
+    let leftCues = f.edges.filter { $0.turnDeg < 0 }.count, rightCues = f.edges.count - leftCues
+    if leftCues > 0 { placed.append(CGRect(x: 0, y: 92, width: W / 2, height: CGFloat(leftCues) * 30 + 4)) }
+    if rightCues > 0 { placed.append(CGRect(x: W / 2, y: 92, width: W / 2, height: CGFloat(rightCues) * 30 + 4)) }
+    let lowest = f.alarmTitle != nil ? H - 108 : H - 56
+    /// First free spot for `box`: stepping up from where it starts, else stepping down
+    /// below the marker (from `below`), else where it started.
+    func settle(_ box: CGRect, step: CGFloat, below: CGFloat) -> CGRect {
+      var b = box
+      while b.minY >= 92 {
+        if !placed.contains(where: { $0.intersects(b) }) { return b }
+        b.origin.y -= step
+      }
+      b.origin.y = below
+      while b.maxY <= lowest {
+        if !placed.contains(where: { $0.intersects(b) }) { return b }
+        b.origin.y += step
+      }
+      return box
+    }
+    func leader(_ x: CGFloat, from top: CGFloat, to bottom: CGFloat, _ col: UIColor, width: CGFloat) {
+      guard top < bottom else { return }
+      c.setStrokeColor(col.cgColor); c.setLineWidth(width)
+      c.move(to: CGPoint(x: x, y: top)); c.addLine(to: CGPoint(x: x, y: bottom)); c.strokePath()
+    }
+    for item in f.items.sorted(by: { $0.rangeNm < $1.rangeNm }) {
       let x = CGFloat(item.x) * W
+      let y = min(max(CGFloat(item.y) * H, 110), H - 30)
       let col = item.severity == .normal && item.source == "ARPA" ? arpa : color(item.severity)
-      var y: CGFloat
-      switch item.kind {
-      case .waypoint: y = horizon
-      default: y = horizon + 40 + CGFloat(max(0, min(1, 1 - item.rangeNm / 4))) * 150
-      }
-      var box = CGRect(x: x - 120, y: y - 78, width: 240, height: 100)
-      while placed.contains(where: { $0.intersects(box) }) && box.maxY < H - 110 {
-        box.origin.y += 70; y += 70
-      }
-      placed.append(box)
 
       c.setStrokeColor(col.cgColor)
       c.setLineWidth(3)
+      var top = y
       switch item.kind {
       case .waypoint:
         let d: CGFloat = 14
         c.move(to: CGPoint(x: x, y: y - d)); c.addLine(to: CGPoint(x: x + d, y: y))
         c.addLine(to: CGPoint(x: x, y: y + d)); c.addLine(to: CGPoint(x: x - d, y: y)); c.closePath()
         c.strokePath()
+        top = y - d
       case .aton, .mark:
-        c.strokeEllipse(in: CGRect(x: x - 10, y: y - 10, width: 20, height: 20))
+        let r: CGFloat = 10
+        c.strokeEllipse(in: CGRect(x: x - r, y: y - 2 * r, width: 2 * r, height: 2 * r))
+        top = y - 2 * r
       case .vessel:
-        // Corner brackets around where the ship sits.
-        let bw: CGFloat = 34, bh: CGFloat = 22, k: CGFloat = 12
-        for (px, py, sx, sy) in [(x - bw, y - bh, 1.0, 1.0), (x + bw, y - bh, -1.0, 1.0),
-                                 (x - bw, y + bh, 1.0, -1.0), (x + bw, y + bh, -1.0, -1.0)] as [(CGFloat, CGFloat, CGFloat, CGFloat)] {
+        // Corner brackets around where the ship sits, resting on the water line.
+        let bw: CGFloat = 30, bh: CGFloat = 18, k: CGFloat = 11, cy = y - bh * 0.7
+        for (px, py, sx, sy) in [(x - bw, cy - bh, 1.0, 1.0), (x + bw, cy - bh, -1.0, 1.0),
+                                 (x - bw, cy + bh, 1.0, -1.0), (x + bw, cy + bh, -1.0, -1.0)] as [(CGFloat, CGFloat, CGFloat, CGFloat)] {
           c.move(to: CGPoint(x: px + sx * k, y: py)); c.addLine(to: CGPoint(x: px, y: py))
           c.addLine(to: CGPoint(x: px, y: py + sy * k))
         }
         c.strokePath()
+        top = cy - bh
       }
-      text(item.title, at: CGPoint(x: x, y: y - 74), font: labelFont(28), color: col, align: .center)
-      text(item.detail, at: CGPoint(x: x, y: y - 42), font: font(20, .regular), color: col, align: .center)
+      let w = max(textWidth(item.title, labelFont(28)), textWidth(item.detail, font(20, .regular))) + 16
+      let box = settle(CGRect(x: min(max(x - w / 2, 0), W - w), y: top - 64, width: w, height: 58),
+                       step: 60, below: y + 18)
+      placed.append(box)
+      if box.minY > y { leader(x, from: y + 6, to: box.minY, col, width: 1.5) }
+      else { leader(x, from: box.maxY, to: top - 4, col, width: 1.5) }
+      text(item.title, at: CGPoint(x: x, y: box.minY), font: labelFont(28), color: col, align: .center)
+      text(item.detail, at: CGPoint(x: x, y: box.minY + 32), font: font(20, .regular), color: col, align: .center)
+    }
+
+    // TimeZero marks: icon on the water, one-line label above, stepped clear of other labels.
+    for m in f.marks {
+      let x = CGFloat(m.x) * W
+      let y = min(max(CGFloat(m.y) * H, 100), H - 30)
+      drawMarkIcon(m.icon, at: CGPoint(x: x, y: y), in: c)
+      let label = "\(m.title) \(m.detail)"
+      let w = textWidth(label, labelFont(21)) + 12
+      let box = settle(CGRect(x: min(max(x - w / 2, 4), W - 4 - w), y: y - 48, width: w, height: 26),
+                       step: 30, below: y + 16)
+      placed.append(box)
+      if box.minY > y { leader(x, from: y + 12, to: box.minY, markColor, width: 1.2) }
+      else { leader(x, from: box.maxY, to: y - 22, markColor, width: 1.2) }
+      text(label, at: CGPoint(x: x, y: box.minY), font: labelFont(21), color: markColor, align: .center)
     }
 
     // Edge cues for things out of view: under the top strip, clear of the labels below.

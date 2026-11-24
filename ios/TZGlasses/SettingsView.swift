@@ -64,6 +64,19 @@ struct SettingsView: View {
         }
 
         Section {
+          Stepper("Eye height \(model.hud.eyeHeightM, specifier: "%.1f") m",
+                  value: $model.hud.eyeHeightM, in: 1...10, step: 0.5)
+          VStack(alignment: .leading) {
+            Text("Horizon: \(model.hud.horizonDeg, specifier: "%+.1f")°")
+            Slider(value: $model.hud.horizonDeg, in: -6...6, step: 0.5)
+          }
+        } header: {
+          Text("On the water")
+        } footer: {
+          Text("Eye height above the water where you stand (usually 2–6 m). Labels sit on the water: far ones near the horizon, near ones lower. Move Horizon until a far ship's marker sits on the real horizon; + moves labels down.")
+        }
+
+        Section {
           sourceToggle("AIS", key: "AIS")
           sourceToggle("ARPA (radar)", key: "ARPA")
         } header: {
