@@ -1052,7 +1052,16 @@ async def main_async(args):
         threading.Thread(target=serial_reader, args=(args.serial, args.baud, push_threadsafe, stop),
                          daemon=True).start()
     if args.udp:
-        await loop.create_datagram_endpoint(lambda: UdpIn(push), local_addr=("0.0.0.0", args.udp))
+        try:
+            await loop.create_datagram_endpoint(lambda: UdpIn(push), local_addr=("0.0.0.0", args.udp))
+        except OSError as e:
+            raise SystemExit(
+                f"\nUDP port {args.udp} is already in use ({e.strerror}).\n"
+                "Another program is listening on it: often an earlier bridge still running in another window,\n"
+                "or another NMEA program. To see which, run in PowerShell:\n"
+                f"  Get-NetUDPEndpoint -LocalPort {args.udp} | Select OwningProcess,"
+                "@{n='Program';e={(Get-Process -Id $_.OwningProcess).ProcessName}}\n"
+                f"Close it, or use another port (e.g. --udp {args.udp + 1}) and set TimeZero's UDP output to that port.")
         log.info("Listening for NMEA on UDP %d", args.udp)
     if args.tcp:
         host, port = args.tcp.rsplit(":", 1)
@@ -1063,7 +1072,12 @@ async def main_async(args):
     app = build_app(state, args.interval)
     runner = web.AppRunner(app)
     await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", args.port).start()
+    try:
+        await web.TCPSite(runner, "0.0.0.0", args.port).start()
+    except OSError as e:
+        await runner.cleanup()
+        raise SystemExit(f"\nWeb port {args.port} is already in use ({e.strerror}). "
+                         f"Close the other program or start with --port {args.port + 1}.")
     for ip in local_ips():
         log.info("Status page:  http://%s:%d/", ip, args.port)
         log.info("Live stream:  ws://%s:%d/ws", ip, args.port)
