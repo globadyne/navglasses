@@ -39,6 +39,22 @@ Gaze = boat heading at calibration + head turn since calibration + fine-tune. Us
 - Marks and routes are read live, read-only, from `C:\ProgramData\TimeZero\DATA\UserObjects.tzdb` (SQLite). Geometry: 1 type byte, then big-endian int32 (lon, lat) pairs scaled 2^31 = 180°. Object type 0 = mark, 5 = route. Dates are seconds since 2000-01-01. Decoded positions matched the user's marks off Nova Scotia's Eastern Shore. Tracks live in `Tracks2.tzdb` (not decoded yet; it was empty).
 - TimeZero runs as administrator on the nav PC, so computer-use input into TimeZero is blocked; use the user's screenshots instead.
 
+## Next: bring the demo's route, tracks and marks into the app
+
+`hud-demo.html` is the reference for these. They work in the demo but are **not yet in the Swift app**:
+
+- **Perspective on the water.** Things on the water sit below the horizon by the dip angle `atan(eyeHeight / range)`. The lens is 600 px over `fovDeg` (default 20°), horizon across the middle, so `y = 300 + dip × (600 / fovDeg)`. The demo uses eye height 20 m; on the boat use a setting (2–6 m) plus a horizon fine-tune, or derive head pitch from `MotionSample.orientation` (HeadMath currently extracts yaw only). Replace the fixed label heights in `HUDImageRenderer` with this.
+- **Route as a ribbon** (`drawRoute` in the demo): legs from the route's waypoints, ±16 m half-width, sampled more finely near the boat, each sample projected left and right edges → filled quads. Not active: thin dashed line. Active (TimeZero navigating it): legs from the boat onward become a **rainbow road** (hue = distance along route / 0.12 nm × 360 − time × 240, plus a faint wider glow and white edges). The part of the current leg behind the boat and earlier legs turn grey. Waypoints come from the bridge: live `route.waypoints` (RTE/WPL), else the active route read from `UserObjects.tzdb` (`active_route` in `/userdata.json` + `routes[].points`).
+- **Tracks:** own track (amber, solid) from `/userdata.json` `own_track`; saved tracks (blue, dotted) from GPX. `Tracks2.tzdb` is not decoded yet.
+- **Marks:** drawn as icons on the water (fish, pots, danger, anchor, from the TimeZero icon number) with a one-line label, as their own layer so they don't compete with ship labels. Map TimeZero `Icon` values to symbols once you see real data.
+- **Text mode** can't draw lines (Meta's display components only), so the route and tracks are Picture mode only; marks appear as rows.
+- **Picture mode bandwidth:** a moving rainbow means every frame changes. If Bluetooth can't keep up, animate the rainbow only every few frames or send a static rainbow.
+
+## Target sources (AIS / ARPA / online AIS)
+
+- The bridge tags targets `source`: `"AIS"` (VDM, or TTM with acquisition `R` = reported), `"ARPA"` (TTM acquisition `A`/`M`, radar-tracked), or `"TTM"` (TTM without the field; treated as AIS). Unnamed ARPA targets are named `ARPA <number>`.
+- The app can hide AIS or ARPA (Settings → Targets) and draws ARPA in orange. The demo also has per-source **custom colours** and **Online AIS** (TimeZero 5's internet AIS, shown with its age); add those to the app. How TZ5 outputs online AIS over NMEA is unknown: check with real TZ5 output before relying on it, and always show its age, because it can be minutes old and must not be treated like live AIS for collision alarms.
+
 ## Ideas not built yet
 
 - Predict head yaw ahead by the measured display latency (gyro rate × latency) so labels don't trail on fast turns.

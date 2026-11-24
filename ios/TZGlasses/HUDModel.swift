@@ -53,6 +53,8 @@ struct HUDItem: Equatable, Sendable {
   var severity: Severity
   /// Waypoints sit on the horizon; vessels sit lower the closer they are.
   var isNextWaypoint: Bool = false
+  /// Where a vessel came from: "AIS", "ARPA" (radar) or nil.
+  var source: String? = nil
 }
 
 /// An arrow at the edge of the lens for something important that is out of view.
@@ -86,6 +88,8 @@ struct HUDSettings: Equatable, Sendable {
   var tcpaLimitMin: Double = 20
   var markRangeNm: Double = 5
   var showMarks: Bool = true
+  /// Target sources to leave out: "AIS", "ARPA". Collision alarms follow the same choice.
+  var hiddenSources: Set<String> = []
 }
 
 enum HUDBuilder {
@@ -113,8 +117,11 @@ enum HUDBuilder {
     if let h = snap.referenceHeading { f.headingText = "HDG \(Geo.threeDigits(h))°" }
     if let sog = own.sog { f.speedText = String(format: "%.1f KN", sog) }
 
+    // Targets from sources the user has switched off are ignored entirely.
+    let allTargets = (snap.targets ?? []).filter { !s.hiddenSources.contains(sourceKey($0)) }
+
     // Alarm: closest-CPA vessel that is not acknowledged.
-    let vessels = (snap.targets ?? []).filter { $0.isVessel }
+    let vessels = allTargets.filter { $0.isVessel }
     let threats = vessels
       .map { ($0, severity(of: $0, s)) }
       .filter { $0.1 != .normal }
@@ -157,7 +164,7 @@ enum HUDBuilder {
       return ((0.5 + rel / s.fovDeg) * 120).rounded() / 120
     }
 
-    for t in snap.targets ?? [] {
+    for t in allTargets {
       guard let x = place(t.bearing), let r = t.rangeNm else { continue }
       let sev = severity(of: t, s)
       if t.isVessel {
@@ -168,7 +175,8 @@ enum HUDBuilder {
           let sog = t.sog.map { String(format: " · %.0f KN", $0) } ?? ""
           detail = String(format: "%.1f NM", r) + sog
         }
-        candidates.append(HUDItem(kind: .vessel, title: displayName(t), detail: detail, x: x, rangeNm: r, severity: sev))
+        candidates.append(HUDItem(kind: .vessel, title: displayName(t), detail: detail, x: x, rangeNm: r,
+                                  severity: sev, source: sourceKey(t)))
       } else {
         candidates.append(HUDItem(kind: .aton, title: shortName(t.name), detail: String(format: "%.1f NM", r),
                                   x: x, rangeNm: r, severity: .normal))
@@ -210,6 +218,9 @@ enum HUDBuilder {
     f.edges = Array(f.edges.prefix(3))
     return f
   }
+
+  /// "ARPA" for radar-tracked targets, otherwise "AIS" (AIS messages, AIS via TTM, or unknown TTM).
+  static func sourceKey(_ t: Target) -> String { t.source == "ARPA" ? "ARPA" : "AIS" }
 
   static func displayName(_ t: Target) -> String {
     if let n = t.name, !n.isEmpty { return shortName(n) }

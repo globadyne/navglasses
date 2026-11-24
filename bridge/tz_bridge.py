@@ -499,7 +499,7 @@ class BoatState:
         self.set_route(arrived=(f[1] == "A" or f[2] == "A"), arrival_radius_nm=num(f[3]))
 
     def _TTM(self, f, _):
-        # tracked target (AIS or radar ARPA) as TimeZero outputs it:
+        # tracked target as TimeZero outputs it: radar ARPA, or AIS when acquisition is R:
         # $--TTM,num,dist,brg,T/R,speed,course,T/R,cpa,tcpa,units,name,status,ref,time,acq
         tnum, dist, brg = f[1], num(f[2]), num(f[3])
         if dist is None or brg is None:
@@ -516,7 +516,11 @@ class BoatState:
             if hdg is None:
                 return
             brg = (brg + hdg) % 360
-        t = self.targets.setdefault(key, {"mmsi": None, "kind": "vessel", "source": "TTM"})
+        t = self.targets.setdefault(key, {"mmsi": None, "kind": "vessel"})
+        # Field 15, type of acquisition: A = automatic, M = manual (both radar ARPA),
+        # R = reported (an AIS target passed through the same sentence).
+        acq = f[15][:1] if len(f) > 15 else ""
+        t["source"] = "AIS" if acq == "R" else "ARPA" if acq in ("A", "M") else t.get("source", "TTM")
         lat, lon = self.own.get("lat"), self.own.get("lon")
         if lat is not None and lon is not None:
             d = dist * to_nm
@@ -531,7 +535,7 @@ class BoatState:
                 crs = (crs + hdg) % 360
             t["cog"] = crs
         name = f[11].strip() if len(f) > 11 else ""
-        t["name"] = name or t.get("name") or f"Target {tnum}"
+        t["name"] = name or t.get("name") or (f"ARPA {tnum}" if t["source"] == "ARPA" else f"Target {tnum}")
         t["seen"] = time.time()
 
     def _WPL(self, f, _):
@@ -588,7 +592,7 @@ class BoatState:
         self._update_target(mmsi, msg)
 
     def _update_target(self, mmsi, m):
-        t = self.targets.setdefault(mmsi, {"mmsi": mmsi, "kind": "vessel"})
+        t = self.targets.setdefault(mmsi, {"mmsi": mmsi, "kind": "vessel", "source": "AIS"})
         mtype = m.get("msg_type")
         lat, lon = m.get("lat"), m.get("lon")
         if lat is not None and lon is not None and abs(lat) <= 90 and abs(lon) <= 180:

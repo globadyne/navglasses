@@ -15,6 +15,8 @@ enum HUDImageRenderer {
   private static let hudDim = UIColor(red: 0.56, green: 0.94, blue: 0.78, alpha: 0.6)
   private static let amber = UIColor(red: 1.0, green: 0.76, blue: 0.40, alpha: 1)
   private static let red = UIColor(red: 1.0, green: 0.49, blue: 0.43, alpha: 1)
+  /// Radar (ARPA) targets, so they read differently from AIS ones.
+  private static let arpa = UIColor(red: 1.0, green: 0.70, blue: 0.36, alpha: 1)
 
   private static func color(_ s: Severity) -> UIColor {
     switch s {
@@ -79,7 +81,7 @@ enum HUDImageRenderer {
     var placed: [CGRect] = []
     for item in f.items.sorted(by: { $0.x < $1.x }) {
       let x = CGFloat(item.x) * W
-      let col = color(item.severity)
+      let col = item.severity == .normal && item.source == "ARPA" ? arpa : color(item.severity)
       var y: CGFloat
       switch item.kind {
       case .waypoint: y = horizon

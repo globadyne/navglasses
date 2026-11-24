@@ -64,6 +64,7 @@
   .seg span { padding: 7px 12px; }
   .seg input:checked + span { background: var(--accent); color: var(--accent-ink); }
   input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=color] { width: 34px; height: 26px; padding: 0 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); cursor: pointer; }
   select { font: 500 13px var(--font-body); background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .readout { font: 500 13px var(--font-data); font-variant-numeric: tabular-nums; color: var(--accent); }
   .check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
@@ -141,6 +142,31 @@
     </div>
 
     <div class="panel">
+      <h2>TimeZero route, marks and tracks</h2>
+      <div class="row">
+        <button id="route-toggle" class="primary">Activate route</button>
+        <span class="readout" id="route-out">Harbour run · not active</span>
+      </div>
+      <p class="hint">Activating is the same as starting navigation on the route in TimeZero. The active legs turn into a glowing rainbow road on the water, flowing toward the next waypoint.</p>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="show-marks" checked> Marks</label>
+        <label class="check"><input type="checkbox" id="show-tracks" checked> Tracks</label>
+      </div>
+      <p class="hint">Look ahead for the route, the lobster pots and the shoal; look astern for your own track.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Targets</h2>
+      <div class="row"><label class="check"><input type="checkbox" id="src-ais" checked> AIS</label>
+        <input type="color" id="col-ais" value="#8ff0c7" aria-label="AIS colour"><span class="hint">From the boat's AIS receiver</span></div>
+      <div class="row"><label class="check"><input type="checkbox" id="src-arpa" checked> ARPA</label>
+        <input type="color" id="col-arpa" value="#ffb35c" aria-label="ARPA colour"><span class="hint">Tracked by the radar, boats without AIS</span></div>
+      <div class="row"><label class="check"><input type="checkbox" id="src-online" checked> Online AIS</label>
+        <input type="color" id="col-online" value="#7fc4ff" aria-label="Online AIS colour"><span class="hint">TimeZero 5's internet AIS, minutes old</span></div>
+      <p class="hint">Collision alarms always show in amber and red, whatever the source.</p>
+    </div>
+
+    <div class="panel">
       <h2>Head direction</h2>
       <input type="range" id="yaw" min="-180" max="180" step="1" value="0" aria-label="Head turn relative to the bow">
       <div class="row">
@@ -193,6 +219,7 @@
             <div class="ios-status"><span class="dot" style="background: var(--ios-green)"></span><b>Glasses</b><span>Ray-Ban Display</span></div>
             <div class="ios-status"><span class="dot" style="background: var(--ios-green)"></span><b>Head tracking</b><span id="ios-head">Glasses: looking at the bow</span></div>
             <div class="ios-status"><span class="dot" style="background: var(--ios-green)"></span><b>Boat data</b><span>Live</span></div>
+            <div class="ios-status"><span class="dot" id="ios-route-dot" style="background: var(--ios-muted)"></span><b>Route</b><span id="ios-route">None active</span></div>
           </div>
           <div>
             <p class="ios-h">Glasses</p>
@@ -230,7 +257,10 @@
         <span><i style="background: #2f4b55"></i>Your eyes</span>
         <span><i style="background: var(--warn)"></i>CPA under 0.5 nm</span>
         <span><i style="background: #e5534b"></i>Buoy</span>
-        <span><i style="background: #b48cf0"></i>TimeZero mark</span>
+        <span><i style="background: rgb(196,156,255)"></i>TimeZero mark</span>
+        <span><i style="background: linear-gradient(90deg,#f44,#fd4,#4f6,#4cf,#a6f)"></i>Active route</span>
+        <span><i style="background: rgb(255,205,90)"></i>Own track</span>
+        <span><i style="background: rgb(110,196,255)"></i>Saved track</span>
       </div>
       <p class="hint">Same sample traffic as the app's demo mode: outbound from Halifax Harbour, with a cargo ship set to cross 0.3 nm ahead.</p>
     </div>
@@ -274,32 +304,78 @@
   }
 
   // ---------- scenario (same as DemoFeed.swift)
-  let own, targets, buoys, marks, wp, simT, ackUntil;
+  let own, targets, buoys, marks, wp, simT, ackUntil, route, nextWp, ownTrack, savedTrack;
+  let routeActive = false, showMarks = true, showTracks = true;
+  // Target sources: each can be shown or hidden, with its own colour (like TimeZero's target settings)
+  const SRC = {
+    ais: { on: true, color: "#8ff0c7", label: "AIS" },
+    arpa: { on: true, color: "#ffb35c", label: "ARPA" },
+    online: { on: true, color: "#7fc4ff", label: "Online AIS" },
+  };
+  const shown = t => SRC[t.src || "ais"].on;
   function reset() {
     simT = 0; ackUntil = -1;
     own = { lat: 44.6205, lon: -63.5560, sog: 6.5, hdg: 160, cog: 160 };
     const place = (b, nm) => offset(own, b, nm);
     const T = 7 * 60, ownT = offset(own, 160, 6.5 * T / 3600);
     const cargoStart = move(offset(ownT, 160, 0.3), 12, 95, T);
+    // src: "ais" = from the AIS receiver, "arpa" = tracked by the radar (no AIS),
+    //      "online" = TimeZero 5's internet AIS (delayed, can be minutes old)
     targets = [
-      { name: "ATLANTIC SAMPLE", type: "Cargo", sog: 12, cog: 275, ...cargoStart },
-      { name: "BLUE HERON", type: "Sailing", sog: 4.5, cog: 340, ...place(200, 1.4) },
-      { name: "HARBOUR FERRY", type: "Passenger", sog: 9, cog: 60, ...place(250, 1.8) },
-      { name: "SEA SPRITE", type: "Pleasure", sog: 0.2, cog: 0, ...place(40, 2.8) },
+      { name: "ATLANTIC SAMPLE", type: "Cargo", src: "ais", sog: 12, cog: 275, ...cargoStart },
+      { name: "BLUE HERON", type: "Sailing", src: "ais", sog: 4.5, cog: 340, ...place(200, 1.4) },
+      { name: "HARBOUR FERRY", type: "Passenger", src: "ais", sog: 9, cog: 60, ...place(250, 1.8) },
+      { name: "ARPA 07", type: "Fishing", src: "arpa", sog: 3.5, cog: 105, ...place(132, 1.1) },
+      { name: "ARPA 12", type: "Fishing", src: "arpa", sog: 0.5, cog: 90, ...place(186, 0.8) },
+      { name: "SEA SPRITE", type: "Pleasure", src: "online", age: 2, sog: 0.2, cog: 0, ...place(40, 2.8) },
+      { name: "OCEAN PROVIDER", type: "Cargo", src: "online", age: 4, sog: 11, cog: 45, ...place(168, 5.5) },
     ];
     buoys = [
       { name: "RED BUOY", color: "#e5534b", ...place(155, 1.2) },
       { name: "GREEN BUOY", color: "#3fbf6f", ...place(170, 2.3) },
     ];
-    marks = [{ name: "FISHING SPOT", lat: 44.6010, lon: -63.5415 }];
-    wp = { name: "WP4 HARBOUR MOUTH", ...offset(own, 158, 4.0) };
+    // TimeZero marks (as the bridge reads them from UserObjects.tzdb)
+    marks = [
+      { name: "FISHING SPOT", icon: "fish", lat: 44.6010, lon: -63.5415 },
+      { name: "LOBSTER POTS", icon: "pots", ...place(149, 0.55) },
+      { name: "SHOAL 2.1 M", icon: "danger", ...place(176, 1.45) },
+      { name: "ANCHORAGE", icon: "anchor", ...place(305, 0.7) },
+    ];
+    // TimeZero route: Harbour run, WP3 just astern of the start, out through the harbour mouth
+    const wp3 = { name: "WP3", ...offset(own, 340, 0.25) };
+    const wp4 = { name: "WP4 HARBOUR MOUTH", ...offset(own, 158, 4.0) };
+    const wp5 = { name: "WP5 OUTER MARK", ...offset(wp4, 172, 2.4) };
+    const wp6 = { name: "WP6 SAMBRO", ...offset(wp5, 228, 3.0) };
+    route = { name: "HARBOUR RUN", wps: [wp3, wp4, wp5, wp6] };
+    nextWp = 1; wp = route.wps[nextWp];
+    // Own track: the way out of the inner harbour, then recorded live as the boat moves
+    ownTrack = [];
+    for (let i = 60; i >= 1; i--) ownTrack.push(offset(own, 338 + 10 * Math.sin(i / 9), i * 0.03));
+    // A saved track from an earlier trip ("Saturday sail" in the bridge's sample GPX)
+    const pts = [[44.6262, -63.5668], [44.6180, -63.5580], [44.6100, -63.5500], [44.6010, -63.5420], [44.5930, -63.5380], [44.5850, -63.5400], [44.5780, -63.5470]];
+    savedTrack = [];
+    for (let i = 0; i < pts.length - 1; i++) for (let k = 0; k < 12; k++) {
+      const f = k / 12, w = 0.00025 * Math.sin((i * 12 + k) / 2.3);
+      savedTrack.push({ lat: pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f + w, lon: pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f - w });
+    }
   }
   function step(dt) {
     simT += dt;
     own.hdg = 160 + 4 * Math.sin(simT / 25); own.cog = own.hdg;
     Object.assign(own, move(own, own.sog, own.cog, dt));
     targets.forEach(t => Object.assign(t, move(t, t.sog, t.cog, dt)));
+    const lastPt = ownTrack[ownTrack.length - 1];
+    if (!lastPt || geom(lastPt, own).rng > 0.01) { ownTrack.push({ lat: own.lat, lon: own.lon }); if (ownTrack.length > 800) ownTrack.shift(); }
+    if (routeActive && geom(own, wp).rng < 0.1) {        // waypoint arrival
+      if (nextWp < route.wps.length - 1) { nextWp++; wp = route.wps[nextWp]; } else routeActive = false;
+    }
     if (simT > 18 * 60) reset();
+  }
+  // Cross-track error on the active leg: + = right of track (steer left).
+  function crossTrack() {
+    const A = geom(own, route.wps[nextWp - 1]), B = geom(own, route.wps[nextWp]);
+    const ux = B.dx - A.dx, uy = B.dy - A.dy, L = Math.hypot(ux, uy) || 1;
+    return (-A.dx) * (uy / L) - (-A.dy) * (ux / L);
   }
   function severity(g) {
     if (g.cpa === null || g.tcpa <= 0 || g.tcpa > S.tcpaLimit) return 0;
@@ -310,7 +386,7 @@
   // ---------- HUD frame (mirrors HUDBuilder.build)
   function buildFrame(gaze) {
     const f = { heading: `HDG ${three(own.hdg)}°`, speed: `${own.sog.toFixed(1)} KN`, gazeText: `${three(gaze)}°`, items: [], edges: [] };
-    const gt = targets.map(t => ({ t, g: geom(own, t), s: 0 }));
+    const gt = targets.filter(shown).map(t => ({ t, g: geom(own, t), s: 0 }));
     gt.forEach(o => (o.s = severity(o.g)));
     const threats = gt.filter(o => o.s > 0).sort((a, b) => a.g.cpa - b.g.cpa);
     if (threats.length && simT > ackUntil) {
@@ -319,24 +395,31 @@
       f.alarmDetail = `${short(a.t.name)} · ${Math.abs(rel)}° ${rel < 0 ? "PORT" : "STBD"}`;
     }
     const gw = geom(own, wp);
-    const xte = Math.abs(0.05 * Math.sin(simT / 25)), steer = Math.sin(simT / 25) > 0 ? "STEER L" : "STEER R";
-    f.footer = `${short(wp.name)} ${gw.rng.toFixed(1)} NM` + (xte >= 0.01 ? ` · XTE ${xte.toFixed(2)} ${steer}` : "");
+    if (routeActive) {
+      const xte = crossTrack(), steer = xte > 0 ? "STEER L" : "STEER R";
+      f.footer = `${short(wp.name)} ${gw.rng.toFixed(1)} NM` + (Math.abs(xte) >= 0.01 ? ` · XTE ${Math.abs(xte).toFixed(2)} ${steer}` : "");
+    } else {
+      f.footer = `DEPTH ${(22 + 3 * Math.sin(simT / 40)).toFixed(0)} M`;
+    }
 
     const place = b => { const rel = wrap(b - gaze); return Math.abs(rel) > S.fov / 2 ? null : Math.round((0.5 + rel / S.fov) * 120) / 120; };
     const c = [];
     gt.forEach(({ t, g, s }) => {
       const x = place(g.brg); if (x === null) return;
-      const detail = s ? `CPA ${g.cpa.toFixed(2)} · ${Math.round(g.tcpa)} MIN` : `${g.rng.toFixed(1)} NM · ${t.sog.toFixed(0)} KN`;
-      c.push({ kind: "vessel", title: short(t.name), detail, x, rng: g.rng, sev: s });
+      let detail = s ? `CPA ${g.cpa.toFixed(2)} · ${Math.round(g.tcpa)} MIN` : `${g.rng.toFixed(1)} NM · ${t.sog.toFixed(0)} KN`;
+      if (t.src === "online") detail += ` · ${t.age} MIN OLD`;
+      c.push({ kind: "vessel", title: short(t.name), detail, x, rng: g.rng, sev: s, src: t.src });
     });
     buoys.forEach(b => { const g = geom(own, b), x = place(g.brg); if (x !== null) c.push({ kind: "aton", title: short(b.name), detail: `${g.rng.toFixed(1)} NM`, x, rng: g.rng, sev: 0 }); });
-    marks.forEach(m => { const g = geom(own, m), x = place(g.brg); if (x !== null && g.rng <= S.markRange) c.push({ kind: "mark", title: short(m.name), detail: `${g.rng.toFixed(1)} NM`, x, rng: g.rng, sev: 0 }); });
-    { const x = place(gw.brg); if (x !== null) c.push({ kind: "waypoint", title: short(wp.name), detail: `${gw.rng.toFixed(1)} NM`, x, rng: gw.rng, sev: 0, next: true }); }
+    if (routeActive) { const x = place(gw.brg); if (x !== null) c.push({ kind: "waypoint", title: short(wp.name), detail: `${gw.rng.toFixed(1)} NM`, x, rng: gw.rng, sev: 0, next: true }); }
     c.sort((a, b) => b.sev - a.sev || (b.next ? 1 : 0) - (a.next ? 1 : 0) || a.rng - b.rng);
     f.items = c.slice(0, S.maxLabels);
+    // TimeZero marks: drawn as their own layer (icons on the water), not competing with ship labels
+    f.marks = showMarks ? marks.map(m => ({ m, g: geom(own, m) })).filter(o => o.g.rng <= S.markRange && place(o.g.brg) !== null)
+      .map(o => ({ title: short(o.m.name), icon: o.m.icon, detail: `${o.g.rng.toFixed(1)} NM`, x: place(o.g.brg), rng: o.g.rng })) : [];
 
     threats.forEach(o => { const rel = wrap(o.g.brg - gaze); if (Math.abs(rel) > S.fov / 2) f.edges.push({ label: short(o.t.name), turn: Math.round(rel), sev: o.s }); });
-    { const rel = wrap(gw.brg - gaze); if (Math.abs(rel) > S.fov / 2) f.edges.push({ label: short(wp.name), turn: Math.round(rel), sev: 0 }); }
+    if (routeActive) { const rel = wrap(gw.brg - gaze); if (Math.abs(rel) > S.fov / 2) f.edges.push({ label: short(wp.name), turn: Math.round(rel), sev: 0 }); }
     f.edges = f.edges.slice(0, 3);
     return { f, gt, gw };
   }
@@ -354,31 +437,157 @@
     c.textAlign = align; c.fillText(s, x, y);
   }
 
-  function renderPicture(c, f) {   // mirrors HUDImageRenderer.draw
+  // ---------- drawing on the water inside the lens
+  // The lens is 600 px across 20 degrees, centred on where you look, with the horizon
+  // across its middle. A point on the water at range r sits below the horizon by the
+  // dip angle atan(eye height / r): far things hug the horizon, near things sit low.
+  const LPPD = 600 / S.fov;                      // lens pixels per degree
+  const MARK = "rgb(196,156,255)", OWNTRK = "rgb(255,205,90)", OLDTRK = "rgb(110,196,255)";
+  function lensPoint(dx, dy, gaze) {             // nm east/north of own boat -> lens px
+    const rng = Math.hypot(dx, dy);
+    if (rng < 0.004) return null;                // right under you
+    const rel = wrap(Math.atan2(dx, dy) * 180 / Math.PI - gaze);
+    if (Math.abs(rel) > 75) return null;         // behind your line of sight
+    return { x: 300 + rel * LPPD, y: 300 + depDeg(rng) * LPPD, rng };
+  }
+  const local = p => { const g = geom(own, p); return [g.dx, g.dy]; };
+
+  function drawTrackLine(c, pts, gaze, col, width, dash) {
+    c.save(); c.strokeStyle = col; c.lineWidth = width; c.setLineDash(dash || []); c.lineCap = "round";
+    let open = false; c.beginPath();
+    pts.forEach(p => {
+      const [dx, dy] = local(p), q = lensPoint(dx, dy, gaze);
+      if (!q) { open = false; return; }
+      if (!open) { c.moveTo(q.x, q.y); open = true; } else c.lineTo(q.x, q.y);
+    });
+    c.stroke(); c.restore();
+  }
+
+  // The route as a ribbon lying on the water. Active legs become a flowing rainbow road.
+  function drawRoute(c, gaze, time) {
+    const wps = route.wps, HW = 16 / 1852;       // half-width: 16 m either side of the track
+    let along = 0;
+    for (let i = 0; i < wps.length - 1; i++) {
+      const [ax, ay] = local(wps[i]), [bx, by] = local(wps[i + 1]);
+      const L = Math.hypot(bx - ax, by - ay), ux = (bx - ax) / L, uy = (by - ay) / L, nx = uy, ny = -ux;
+      const live = routeActive && i >= nextWp - 1;
+      // On the leg being sailed, the part behind the boat is already done.
+      const sOwn = routeActive && i === nextWp - 1 ? clamp(-(ax * ux + ay * uy), 0, L) : -1;
+      let s = 0, prev = null;
+      while (s <= L + 1e-9) {
+        const px = ax + ux * s, py = ay + uy * s, dist = Math.hypot(px, py);
+        const cur = {
+          l: lensPoint(px + nx * HW, py + ny * HW, gaze), r: lensPoint(px - nx * HW, py - ny * HW, gaze),
+          lw: lensPoint(px + nx * HW * 1.8, py + ny * HW * 1.8, gaze), rw: lensPoint(px - nx * HW * 1.8, py - ny * HW * 1.8, gaze),
+          m: lensPoint(px, py, gaze), s: along + s,
+        };
+        if (prev && cur.l && cur.r && prev.l && prev.r) {
+          if (live && s > sOwn) {
+            const hue = ((cur.s / 0.12) * 360 - time * 240) % 360;
+            const quad = (a, b, d, e, fill) => { c.fillStyle = fill; c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.lineTo(d.x, d.y); c.lineTo(e.x, e.y); c.closePath(); c.fill(); };
+            if (cur.lw && cur.rw && prev.lw && prev.rw) quad(prev.lw, cur.lw, cur.rw, prev.rw, `hsla(${hue},100%,60%,0.12)`);   // glow
+            quad(prev.l, cur.l, cur.r, prev.r, `hsla(${hue},100%,${62 + 8 * Math.sin(time * 6 + cur.s * 40)}%,0.9)`);
+            c.strokeStyle = "rgba(255,255,255,0.55)"; c.lineWidth = 1.5;                                                   // bright edges
+            c.beginPath(); c.moveTo(prev.l.x, prev.l.y); c.lineTo(cur.l.x, cur.l.y); c.moveTo(prev.r.x, prev.r.y); c.lineTo(cur.r.x, cur.r.y); c.stroke();
+          } else if (prev.m && cur.m) {
+            c.strokeStyle = live || routeActive ? "rgba(140,150,160,0.45)" : "rgba(225,235,245,0.6)";   // passed, or not activated
+            c.lineWidth = 2.5; c.setLineDash([12, 9]);
+            c.beginPath(); c.moveTo(prev.m.x, prev.m.y); c.lineTo(cur.m.x, cur.m.y); c.stroke(); c.setLineDash([]);
+          }
+        }
+        prev = cur;
+        if (s >= L) break;
+        s = Math.min(L, s + clamp(dist * 0.06, 0.003, 0.2));
+      }
+      along += L;
+    }
+    // Waypoints: small markers on the water (the next one gets a full label from the item list)
+    const used = [];
+    wps.forEach((w, i) => {
+      const [dx, dy] = local(w), q = lensPoint(dx, dy, gaze);
+      if (!q || (routeActive && i === nextWp)) return;
+      const col = routeActive ? (i < nextWp ? "rgba(140,150,160,0.6)" : "rgb(255,255,255)") : "rgba(225,235,245,0.8)";
+      c.strokeStyle = col; c.lineWidth = 2; const d = 8;
+      c.beginPath(); c.moveTo(q.x, q.y - d); c.lineTo(q.x + d, q.y); c.lineTo(q.x, q.y + d); c.lineTo(q.x - d, q.y); c.closePath(); c.stroke();
+      if (used.some(u => Math.abs(u - q.x) < 56)) return;          // far waypoints bunch up: label only the first
+      used.push(q.x);
+      txt(c, short(w.name).split(" ")[0], q.x, q.y - 30, `500 17px ${MONO}`, col, "center");
+    });
+  }
+
+  function markIcon(c, icon, x, y) {
+    c.strokeStyle = MARK; c.fillStyle = MARK; c.lineWidth = 2.5; c.beginPath();
+    if (icon === "fish") {
+      c.ellipse(x - 2, y, 11, 6, 0, 0, Math.PI * 2); c.moveTo(x + 8, y); c.lineTo(x + 16, y - 6); c.lineTo(x + 16, y + 6); c.closePath(); c.stroke();
+    } else if (icon === "pots") {
+      c.arc(x, y + 2, 6, 0, Math.PI * 2); c.moveTo(x, y - 4); c.lineTo(x, y - 18); c.stroke();
+      c.beginPath(); c.moveTo(x, y - 18); c.lineTo(x + 10, y - 14); c.lineTo(x, y - 10); c.fill();
+    } else if (icon === "danger") {
+      c.arc(x, y, 11, 0, Math.PI * 2); c.moveTo(x - 6, y - 6); c.lineTo(x + 6, y + 6); c.moveTo(x + 6, y - 6); c.lineTo(x - 6, y + 6); c.stroke();
+    } else if (icon === "anchor") {
+      c.arc(x, y - 11, 3.5, 0, Math.PI * 2); c.moveTo(x, y - 7); c.lineTo(x, y + 10); c.moveTo(x - 7, y - 3); c.lineTo(x + 7, y - 3);
+      c.moveTo(x - 10, y + 2); c.quadraticCurveTo(x - 9, y + 11, x, y + 11); c.quadraticCurveTo(x + 9, y + 11, x + 10, y + 2); c.stroke();
+    } else { c.arc(x, y, 8, 0, Math.PI * 2); c.stroke(); }
+  }
+
+  function renderPicture(c, f, gaze, time, worldPpd) {   // mirrors HUDImageRenderer.draw, plus route, tracks and marks
     const W = 600, H = 600;
     c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
+
+    // Ground layer: tracks, then the route, then marks
+    if (showTracks) {
+      drawTrackLine(c, savedTrack, gaze, OLDTRK, 2.5, [3, 7]);
+      drawTrackLine(c, [...ownTrack, { lat: own.lat, lon: own.lon }], gaze, OWNTRK, 3.5);
+    }
+    drawRoute(c, gaze, time);
+
     txt(c, f.heading, 24, 20, `500 28px ${MONO}`, HUD);
     txt(c, f.speed, W - 24, 20, `500 28px ${MONO}`, HUD, "right");
     txt(c, f.gazeText, W / 2, 58, `400 24px ${MONO}`, HUD_DIM, "center");
-    const horizon = 250, placed = [];
-    [...f.items].sort((a, b) => a.x - b.x).forEach(it => {
-      const x = it.x * W, col = sevCol(it.sev);
-      let y = it.kind === "waypoint" ? horizon : horizon + 40 + clamp(1 - it.rng / 4, 0, 1) * 150;
-      let box = { x: x - 120, y: y - 78, w: 240, h: 100 };
-      const hit = b => placed.some(p => p.x < b.x + b.w && b.x < p.x + p.w && p.y < b.y + b.h && b.y < p.y + p.h);
-      while (hit(box) && box.y + box.h < H - 110) { box.y += 70; y += 70; }
-      placed.push(box);
+
+    // Labels: the marker sits where the thing is on the water; the text sits above it,
+    // stepping up (with a leader line) when labels would overlap.
+    const placed = [], k = LPPD / worldPpd;
+    const hit = b => placed.some(p => p.x < b.x + b.w && b.x < p.x + p.w && p.y < b.y + b.h && b.y < p.y + p.h);
+    [...f.items].sort((a, b) => a.rng - b.rng).forEach(it => {
+      const x = it.x * W, col = it.sev ? sevCol(it.sev) : it.src ? SRC[it.src].color : HUD;
+      const y = clamp(300 + depDeg(it.rng) * LPPD, 110, H - 30);
+      const sz = objScale(it.rng) * k;          // ship size on the lens
       c.strokeStyle = col; c.lineWidth = 3; c.beginPath();
-      if (it.kind === "waypoint") { const d = 14; c.moveTo(x, y - d); c.lineTo(x + d, y); c.lineTo(x, y + d); c.lineTo(x - d, y); c.closePath(); }
-      else if (it.kind === "vessel") {
-        const bw = 34, bh = 22, k = 12;
-        [[x - bw, y - bh, 1, 1], [x + bw, y - bh, -1, 1], [x - bw, y + bh, 1, -1], [x + bw, y + bh, -1, -1]].forEach(([px, py, sx, sy]) => {
-          c.moveTo(px + sx * k, py); c.lineTo(px, py); c.lineTo(px, py + sy * k);
+      let top = y;
+      if (it.kind === "waypoint") {
+        const d = 14; c.moveTo(x, y - d); c.lineTo(x + d, y); c.lineTo(x, y + d); c.lineTo(x - d, y); c.closePath(); top = y - d;
+      } else if (it.kind === "vessel") {
+        const bw = Math.max(24, 26 * sz), bh = Math.max(16, 16 * sz), cy = y - bh * 0.7, kk = 10;
+        [[x - bw, cy - bh, 1, 1], [x + bw, cy - bh, -1, 1], [x - bw, cy + bh, 1, -1], [x + bw, cy + bh, -1, -1]].forEach(([px, py, sx, sy]) => {
+          c.moveTo(px + sx * kk, py); c.lineTo(px, py); c.lineTo(px, py + sy * kk);
         });
-      } else c.arc(x, y, 10, 0, Math.PI * 2);
+        top = cy - bh;
+      } else { const r = Math.max(9, 8 * sz); c.arc(x, y - r, r, 0, Math.PI * 2); top = y - 2 * r; }
       c.stroke();
-      txt(c, it.title, x, y - 74, `600 28px ${COND}`, col, "center");
-      txt(c, it.detail, x, y - 42, `400 20px ${MONO}`, col, "center");
+      // Size the box to the actual text, positioned the way txt() will clamp it into the lens.
+      c.font = `600 28px ${COND}`; const tw = c.measureText(it.title).width;
+      c.font = `400 20px ${MONO}`; const dw = c.measureText(it.detail).width;
+      const bw = Math.max(tw, dw) + 16;
+      const box = { x: clamp(x - bw / 2, 0, W - bw), y: top - 64, w: bw, h: 58 };
+      while (hit(box) && box.y > 92) box.y -= 60;
+      placed.push(box);
+      if (box.y + box.h < top - 8) { c.strokeStyle = col; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x, box.y + box.h); c.lineTo(x, top - 4); c.stroke(); }
+      txt(c, it.title, x, box.y, `600 28px ${COND}`, col, "center");
+      txt(c, it.detail, x, box.y + 32, `400 20px ${MONO}`, col, "center");
+    });
+
+    // TimeZero marks: icon on the water, one-line label above, stepped clear of other labels
+    (f.marks || []).forEach(m => {
+      const x = m.x * W, y = clamp(300 + depDeg(m.rng) * LPPD, 100, H - 30);
+      markIcon(c, m.icon, x, y);
+      const label = `${m.title} ${m.detail.replace(" NM", "")}`;
+      c.font = `600 21px ${COND}`; const w = c.measureText(label).width + 12;
+      const box = { x: clamp(x - w / 2, 4, W - 4 - w), y: y - 48, w, h: 26 };
+      while (hit(box) && box.y > 92) box.y -= 30;
+      placed.push(box);
+      if (box.y + box.h < y - 26) { c.strokeStyle = MARK; c.lineWidth = 1.2; c.beginPath(); c.moveTo(x, box.y + box.h); c.lineTo(x, y - 22); c.stroke(); }
+      txt(c, label, x, box.y, `600 21px ${COND}`, MARK, "center");
     });
     let ly = 96, ry = 96;
     f.edges.forEach(e => {
@@ -401,7 +610,8 @@
     txt(c, f.gazeText, W / 2, P, `500 22px ${SANS}`, SEC, "center");
     txt(c, f.speed, W - P, P, `500 22px ${SANS}`, PRI, "right");
     let y = P + 44;
-    f.items.slice(0, 3).forEach(it => {
+    // Meta's components can't draw lines, so the route and tracks don't appear in Text mode; marks do, as rows.
+    [...f.items, ...(f.marks || []).map(m => ({ ...m, sev: 0 }))].slice(0, 3).forEach(it => {
       const big = it.sev > 0;
       c.font = `600 ${big ? 34 : 28}px ${SANS}`; const w1 = c.measureText(it.title).width;
       c.font = `500 22px ${SANS}`; const w2 = c.measureText(it.detail).width;
@@ -531,7 +741,11 @@
   }
   const lighthouse = { brg: 214, land: LAND[2] };
 
-  const objY = (hy, rng) => hy + clamp(0.045 * H / Math.max(rng, 0.15), 2 * dpr, 0.2 * H);
+  // Things on the water sit below the horizon by the dip angle. Eye height is set a little
+  // high (20 m) so the demo's sea reads at screen size; the lens uses the same rule.
+  const EYE_M = 20;
+  const depDeg = rngNm => Math.atan(EYE_M / Math.max(rngNm * 1852, 1)) * 180 / Math.PI;
+  const objY = (hy, rng, ppd) => hy + depDeg(rng) * ppd;
   const objScale = rng => clamp(1.1 / Math.max(rng, 0.2), 0.35, 3.2) * dpr;
   const hazeAlpha = rng => clamp((rng - 0.4) / 5, 0, 0.6);
 
@@ -748,7 +962,7 @@
       .sort((a, b) => b.g.rng - a.g.rng)
       .forEach(o => {
         const x = xAt(o.g.brg); if (x < -100 * dpr || x > W + 100 * dpr) return;
-        const y = objY(hy, o.g.rng), s = objScale(o.g.rng);
+        const y = objY(hy, o.g.rng, ppd), s = objScale(o.g.rng);
         c.globalAlpha = 1 - (P.lights ? 0 : hazeAlpha(o.g.rng));
         if (o.k === "b") drawBuoy(c, x, y, s * 0.8, o.b.color, P, time, o.g.rng);
         else drawShip(c, x, y, s, o.t, o.g, P, time);
@@ -814,7 +1028,8 @@
     const gazeEst = own.hdg + lagSample(now) + driftErr + fineTune;
     const { f, gt, gw } = buildFrame(gazeEst);
     lastFrame = f;
-    (lensMode === "picture" ? renderPicture : renderText)(lctx, f);
+    if (lensMode === "picture") renderPicture(lctx, f, gazeEst, now / 1000, ppd);
+    else renderText(lctx, f);
 
     const lensPx = 20 * ppd, lx = W / 2 - lensPx / 2, ly = hy - lensPx * 0.5;
     c.globalCompositeOperation = "source-over";
@@ -861,15 +1076,34 @@
     for (let i = 1; i <= 3; i++) { c.beginPath(); c.arc(cx, cy, pnm * i, 0, Math.PI * 2); c.stroke(); }
     c.fillStyle = "#8ea4a2"; c.font = `22px ${COND}`; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("N", cx, 14);
     const toXY = g => [cx + g.dx * pnm, cy - g.dy * pnm];
-    let [wx, wy] = toXY(gw); const wl = Math.hypot(wx - cx, wy - cy);
-    if (wl > R) { wx = cx + (wx - cx) * R / wl; wy = cy + (wy - cy) * R / wl; }
-    c.setLineDash([8, 8]); c.strokeStyle = "rgba(142,240,200,0.5)"; c.beginPath(); c.moveTo(cx, cy); c.lineTo(wx, wy); c.stroke(); c.setLineDash([]);
+    const P = p => toXY(geom(own, p));
+    c.save(); c.beginPath(); c.arc(cx, cy, R, 0, Math.PI * 2); c.clip();
+    const poly = (pts, col, w, dash) => {
+      c.strokeStyle = col; c.lineWidth = w; c.setLineDash(dash || []); c.beginPath();
+      pts.forEach((p, i) => { const [x, y] = P(p); i ? c.lineTo(x, y) : c.moveTo(x, y); }); c.stroke(); c.setLineDash([]);
+    };
+    if (showTracks) { poly(savedTrack, OLDTRK, 2.5, [3, 6]); poly([...ownTrack, own], OWNTRK, 3); }
+    const t = performance.now() / 1000;
+    route.wps.slice(0, -1).forEach((a, i) => {
+      const b = route.wps[i + 1], [ax, ay] = P(a), [bx, by] = P(b);
+      if (routeActive && i >= nextWp - 1) {
+        const g = c.createLinearGradient(ax, ay, bx, by);
+        for (let k = 0; k <= 6; k++) g.addColorStop(k / 6, `hsl(${(k * 60 - t * 240) % 360},100%,60%)`);
+        c.strokeStyle = g; c.lineWidth = 7; c.setLineDash([]);
+        c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
+      } else {
+        c.strokeStyle = routeActive ? "rgba(140,150,160,0.6)" : "rgba(225,235,245,0.7)"; c.lineWidth = 2.5; c.setLineDash([10, 8]);
+        c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke(); c.setLineDash([]);
+      }
+    });
+    route.wps.forEach(w => { const [x, y] = P(w); c.strokeStyle = "#fff"; c.lineWidth = 2; c.beginPath(); c.moveTo(x, y - 8); c.lineTo(x + 8, y); c.lineTo(x, y + 8); c.lineTo(x - 8, y); c.closePath(); c.stroke(); });
     buoys.forEach(b => { const g = geom(own, b); if (g.rng > range) return; const [x, y] = toXY(g); c.fillStyle = b.color; c.fillRect(x - 7, y - 7, 14, 14); });
-    marks.forEach(m => { const g = geom(own, m); if (g.rng > range) return; const [x, y] = toXY(g); c.fillStyle = "#b48cf0"; c.beginPath(); c.arc(x, y, 8, 0, Math.PI * 2); c.fill(); });
+    if (showMarks) marks.forEach(m => { const [x, y] = P(m); c.save(); c.translate(x, y); c.scale(0.9, 0.9); markIcon(c, m.icon, 0, 0); c.restore(); });
+    c.restore();
     gt.forEach(({ t, g, s }) => {
       if (g.rng > range) return;
       const [x, y] = toXY(g);
-      c.fillStyle = s === 2 ? RED : s === 1 ? AMBER : "#b8c4c1";
+      c.fillStyle = s === 2 ? RED : s === 1 ? AMBER : SRC[t.src || "ais"].color;
       c.save(); c.translate(x, y); c.rotate(rad(t.cog)); c.beginPath(); c.moveTo(0, -14); c.lineTo(9, 10); c.lineTo(-9, 10); c.closePath(); c.fill(); c.restore();
     });
     c.fillStyle = HUD; c.save(); c.translate(cx, cy); c.rotate(rad(own.hdg));
@@ -883,6 +1117,11 @@
     $("ios-mode").textContent = `Lens mode: ${lensMode === "picture" ? "Picture" : "Text"}`;
     $("ios-fine").hidden = fineTune === 0;
     $("ios-fine").textContent = `Fine tune ${fineTune}°`;
+    const gw = geom(own, wp);
+    $("ios-route").textContent = routeActive ? `Harbour run · ${short(wp.name).split(" ")[0]} ${gw.rng.toFixed(1)} nm` : "None active";
+    $("ios-route-dot").style.background = routeActive ? "var(--ios-green)" : "var(--ios-muted)";
+    $("route-out").textContent = routeActive ? `Harbour run · next ${short(wp.name)} ${gw.rng.toFixed(1)} nm` : "Harbour run · not active";
+    $("route-toggle").textContent = routeActive ? "Stop navigation" : "Activate route";
     $("clock").textContent = `Sim time ${String(Math.floor(simT / 60)).padStart(2, "0")}:${String(Math.floor(simT % 60)).padStart(2, "0")}`;
     const d = new Date(); $("ios-time").textContent = `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, "0")}`;
   }
@@ -893,7 +1132,7 @@
   $("yaw").addEventListener("input", e => setYaw(+e.target.value));
   document.querySelectorAll("[data-yaw]").forEach(b => b.addEventListener("click", () => setYaw(+b.dataset.yaw)));
   $("look-threat").addEventListener("click", () => {
-    const best = targets.map(t => ({ t, g: geom(own, t) })).filter(o => o.g.tcpa > 0).sort((a, b) => a.g.cpa - b.g.cpa)[0];
+    const best = targets.filter(shown).map(t => ({ t, g: geom(own, t) })).filter(o => o.g.tcpa > 0).sort((a, b) => a.g.cpa - b.g.cpa)[0];
     if (best) setYaw(wrap(best.g.brg - own.hdg));
   });
   $("pinch").addEventListener("click", () => (lastFrame && lastFrame.alarmTitle ? acknowledge() : recenter()));
@@ -904,6 +1143,17 @@
   $("play").addEventListener("click", () => { playing = !playing; $("play").textContent = playing ? "Pause" : "Play"; });
   $("speed").addEventListener("change", e => { speed = +e.target.value; });
   $("restart").addEventListener("click", () => reset());
+  $("route-toggle").addEventListener("click", () => {
+    routeActive = !routeActive;
+    if (routeActive) { nextWp = 1; wp = route.wps[1]; }
+    updatePhone();
+  });
+  Object.keys(SRC).forEach(k => {
+    $(`src-${k}`).addEventListener("change", e => { SRC[k].on = e.target.checked; });
+    $(`col-${k}`).addEventListener("input", e => { SRC[k].color = e.target.value; });
+  });
+  $("show-marks").addEventListener("change", e => { showMarks = e.target.checked; });
+  $("show-tracks").addEventListener("change", e => { showTracks = e.target.checked; });
   $("lag").addEventListener("input", e => { lagMs = +e.target.value; $("lag-out").textContent = lagMs + " ms"; });
   $("drift").addEventListener("change", e => { driftOn = e.target.checked; });
   document.querySelectorAll('input[name="mode"]').forEach(r => r.addEventListener("change", e => {

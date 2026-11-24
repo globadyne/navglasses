@@ -63,6 +63,15 @@ struct SettingsView: View {
           Text("Turn on Reverse if labels move the wrong way when you turn your head. Adjust Display width until a label stays on its ship as you turn: too wide and labels move faster than the ship, too narrow and they lag behind.")
         }
 
+        Section {
+          sourceToggle("AIS", key: "AIS")
+          sourceToggle("ARPA (radar)", key: "ARPA")
+        } header: {
+          Text("Targets")
+        } footer: {
+          Text("ARPA targets are boats tracked by your radar, including ones without AIS. They show in orange; AIS targets in green. Hidden targets don't raise collision alarms.")
+        }
+
         Section("Collision alarms") {
           Stepper("Caution under \(model.hud.cpaCautionNm, specifier: "%.2f") nm",
                   value: $model.hud.cpaCautionNm, in: 0.1...3, step: 0.05)
@@ -80,5 +89,14 @@ struct SettingsView: View {
       .toolbar { Button("Done") { dismiss() } }
       .onAppear { address = model.bridgeAddress }
     }
+  }
+
+  private func sourceToggle(_ title: String, key: String) -> some View {
+    Toggle(title, isOn: Binding(
+      get: { !model.hud.hiddenSources.contains(key) },
+      set: { show in
+        if show { model.hud.hiddenSources.remove(key) } else { model.hud.hiddenSources.insert(key) }
+      }
+    ))
   }
 }

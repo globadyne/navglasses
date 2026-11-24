@@ -53,6 +53,7 @@ final class AppModel {
     if let v = d.object(forKey: "cpaDangerNm") as? Double { s.cpaDangerNm = v }
     if let v = d.object(forKey: "markRangeNm") as? Double { s.markRangeNm = v }
     if let v = d.object(forKey: "showMarks") as? Bool { s.showMarks = v }
+    if let v = d.stringArray(forKey: "hiddenSources") { s.hiddenSources = Set(v) }
     hud = s
     head.reverseDirection = d.bool(forKey: "reverseDirection")
     if let src = HeadSource(rawValue: d.string(forKey: "headSource") ?? "") { head.source = src }
@@ -90,6 +91,7 @@ final class AppModel {
     defaults.set(hud.cpaDangerNm, forKey: "cpaDangerNm")
     defaults.set(hud.markRangeNm, forKey: "markRangeNm")
     defaults.set(hud.showMarks, forKey: "showMarks")
+    defaults.set(Array(hud.hiddenSources), forKey: "hiddenSources")
   }
 
   private func applyDataSource() {
