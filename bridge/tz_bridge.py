@@ -889,13 +889,21 @@ class UdpIn(asyncio.DatagramProtocol):
 async def tcp_reader(host, port, push):
     while True:
         try:
-            reader, writer = await asyncio.open_connection(host, port)
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), 10)
             log.info("Connected to %s:%d", host, port)
-            while True:
-                raw = await reader.readline()
-                if not raw:
-                    break
-                push(raw.decode("ascii", errors="ignore"))
+            try:
+                while True:
+                    # If TimeZero restarts, the old connection can go quiet without closing.
+                    # Nothing for 20 s means it's dead: reconnect.
+                    raw = await asyncio.wait_for(reader.readline(), 20)
+                    if not raw:
+                        log.warning("TCP %s:%d closed by TimeZero (reconnecting)", host, port)
+                        break
+                    push(raw.decode("ascii", errors="ignore"))
+            finally:
+                writer.close()
+        except asyncio.TimeoutError:
+            log.warning("TCP %s:%d: no data for 20 s (reconnecting)", host, port)
         except OSError as e:
             log.warning("TCP %s:%d: %s (retrying in 3 s)", host, port, e)
         await asyncio.sleep(3)
