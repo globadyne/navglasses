@@ -55,7 +55,7 @@ struct HUDItem: Equatable, Sendable {
   var severity: Severity
   /// Waypoints sit on the horizon; vessels sit lower the closer they are.
   var isNextWaypoint: Bool = false
-  /// Where a vessel came from: "AIS", "ARPA" (radar) or nil.
+  /// Where a vessel came from: "AIS", "ARPA" (radar), "ONLINE" (internet AIS) or nil.
   var source: String? = nil
 }
 
@@ -239,11 +239,15 @@ struct HUDSettings: Equatable, Sendable {
   var trackRangeNm: Double = 6
   /// Target sources to leave out: "AIS", "ARPA". Collision alarms follow the same choice.
   var hiddenSources: Set<String> = []
+  /// Label colour per target source, as "#rrggbb". Alarms override it with amber or red.
+  var sourceColors: [String: String] = HUDSettings.defaultSourceColors
+  static let defaultSourceColors = ["AIS": "#8ff0c7", "ARPA": "#ffb35c", "ONLINE": "#7fc4ff"]
 }
 
 enum HUDBuilder {
   static func severity(of t: Target, _ s: HUDSettings) -> Severity {
-    guard t.isVessel, let cpa = t.cpaNm, let tcpa = t.tcpaMin, tcpa > 0, tcpa <= s.tcpaLimitMin else {
+    // Online AIS can be minutes old: never use it for collision alarms.
+    guard t.isVessel, sourceKey(t) != "ONLINE", let cpa = t.cpaNm, let tcpa = t.tcpaMin, tcpa > 0, tcpa <= s.tcpaLimitMin else {
       return .normal
     }
     if cpa < s.cpaDangerNm { return .danger }
@@ -337,7 +341,12 @@ enum HUDBuilder {
           detail = String(format: "CPA %.2f · %d MIN", cpa, Int(tcpa.rounded()))
         } else {
           let sog = t.sog.map { String(format: " · %.0f KN", $0) } ?? ""
-          detail = String(format: "%.1f NM", r) + sog
+          var d = String(format: "%.1f NM", r) + sog
+          // Always say how old internet AIS is.
+          if sourceKey(t) == "ONLINE" {
+            d += t.ageS.map { $0 < 60 ? " · <1 MIN OLD" : " · \(Int(($0 / 60).rounded())) MIN OLD" } ?? " · ONLINE"
+          }
+          detail = d
         }
         candidates.append(HUDItem(kind: .vessel, title: displayName(t), detail: detail, x: x, y: height(r),
                                   rangeNm: r, severity: sev, source: sourceKey(t)))
@@ -493,8 +502,14 @@ enum HUDBuilder {
     return (y * 120).rounded() / 120
   }
 
-  /// "ARPA" for radar-tracked targets, otherwise "AIS" (AIS messages, AIS via TTM, or unknown TTM).
-  static func sourceKey(_ t: Target) -> String { t.source == "ARPA" ? "ARPA" : "AIS" }
+  /// "ARPA" for radar-tracked targets, "ONLINE" for internet AIS, otherwise "AIS"
+  /// (AIS messages, AIS via TTM, or unknown TTM).
+  static func sourceKey(_ t: Target) -> String {
+    let s = (t.source ?? "").uppercased()
+    if s == "ARPA" { return "ARPA" }
+    if s.hasPrefix("ONLINE") { return "ONLINE" }
+    return "AIS"
+  }
 
   static func displayName(_ t: Target) -> String {
     if let n = t.name, !n.isEmpty { return shortName(n) }

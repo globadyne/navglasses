@@ -9,7 +9,11 @@
 import Foundation
 
 struct DemoFeed {
-  private struct Mover { var name: String; var type: String; var lat: Double; var lon: Double; var sog: Double; var cog: Double; var mmsi: Int }
+  private struct Mover {
+    var name: String; var type: String; var lat: Double; var lon: Double; var sog: Double; var cog: Double; var mmsi: Int
+    /// "AIS", "ARPA" (radar-tracked) or "ONLINE" (internet AIS), and for online AIS how old it is.
+    var source = "AIS"; var ageS: Double? = nil
+  }
 
   private var ownLat = 44.6205
   private var ownLon = -63.5560
@@ -48,11 +52,17 @@ struct DemoFeed {
     let cpaPoint = Self.offset(ownLater.0, ownLater.1, bearing: 160, nm: 0.3)
     let cargoStart = Self.move(cpaPoint.0, cpaPoint.1, sog: 12, cog: 95, seconds: tCross)
     let heron = place(200, 1.4), ferry = place(250, 1.8), sprite = place(40, 2.8)
+    let arpa7 = place(132, 1.1), arpa12 = place(186, 0.8), provider = place(168, 5.5)
     movers = [
       Mover(name: "ATLANTIC SAMPLE", type: "Cargo", lat: cargoStart.0, lon: cargoStart.1, sog: 12, cog: 275, mmsi: 316001234),
       Mover(name: "BLUE HERON", type: "Sailing", lat: heron.0, lon: heron.1, sog: 4.5, cog: 340, mmsi: 316005678),
       Mover(name: "HARBOUR FERRY", type: "Passenger", lat: ferry.0, lon: ferry.1, sog: 9, cog: 60, mmsi: 316009012),
-      Mover(name: "SEA SPRITE", type: "Pleasure", lat: sprite.0, lon: sprite.1, sog: 0.2, cog: 0, mmsi: 316003456),
+      Mover(name: "ARPA 07", type: "Fishing", lat: arpa7.0, lon: arpa7.1, sog: 3.5, cog: 105, mmsi: 0, source: "ARPA"),
+      Mover(name: "ARPA 12", type: "Fishing", lat: arpa12.0, lon: arpa12.1, sog: 0.5, cog: 90, mmsi: 0, source: "ARPA"),
+      Mover(name: "SEA SPRITE", type: "Pleasure", lat: sprite.0, lon: sprite.1, sog: 0.2, cog: 0, mmsi: 316003456,
+            source: "ONLINE", ageS: 120),
+      Mover(name: "OCEAN PROVIDER", type: "Cargo", lat: provider.0, lon: provider.1, sog: 11, cog: 45, mmsi: 316007890,
+            source: "ONLINE", ageS: 240),
     ]
     let red = place(155, 1.2), green = place(170, 2.3)
     buoys = [("RED BUOY", red.0, red.1), ("GREEN BUOY", green.0, green.1)]
@@ -137,7 +147,8 @@ struct DemoFeed {
       let vx = m.sog * sin(m.cog * .pi / 180) - ownVx, vy = m.sog * cos(m.cog * .pi / 180) - ownVy
       let v2 = vx * vx + vy * vy
       let th = v2 < 1e-9 ? 0 : max(0, -(dx * vx + dy * vy) / v2)
-      return Target(mmsi: m.mmsi, name: m.name, kind: "vessel", typeLabel: m.type, lat: m.lat, lon: m.lon,
+      return Target(mmsi: m.mmsi == 0 ? nil : m.mmsi, name: m.name, kind: "vessel",
+                    typeLabel: m.source == "ARPA" ? nil : m.type, source: m.source, ageS: m.ageS, lat: m.lat, lon: m.lon,
                     sog: m.sog, cog: m.cog, rangeNm: r, bearing: b,
                     cpaNm: hypot(dx + vx * th, dy + vy * th), tcpaMin: th * 60)
     }

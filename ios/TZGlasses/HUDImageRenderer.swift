@@ -15,8 +15,13 @@ enum HUDImageRenderer {
   private static let hudDim = UIColor(red: 0.56, green: 0.94, blue: 0.78, alpha: 0.6)
   private static let amber = UIColor(red: 1.0, green: 0.76, blue: 0.40, alpha: 1)
   private static let red = UIColor(red: 1.0, green: 0.49, blue: 0.43, alpha: 1)
-  /// Radar (ARPA) targets, so they read differently from AIS ones.
-  private static let arpa = UIColor(red: 1.0, green: 0.70, blue: 0.36, alpha: 1)
+  /// "#rrggbb" -> colour; nil if it doesn't parse.
+  static func color(hex: String) -> UIColor? {
+    let h = hex.trimmingCharacters(in: CharacterSet(charactersIn: "# "))
+    guard h.count == 6, let v = UInt32(h, radix: 16) else { return nil }
+    return UIColor(red: CGFloat((v >> 16) & 0xff) / 255, green: CGFloat((v >> 8) & 0xff) / 255,
+                   blue: CGFloat(v & 0xff) / 255, alpha: 1)
+  }
   /// TimeZero marks: violet, so they read apart from targets.
   private static let markColor = UIColor(red: 0.77, green: 0.61, blue: 1.0, alpha: 1)
 
@@ -37,7 +42,8 @@ enum HUDImageRenderer {
   }
 
   /// - Parameter scale: 1 for the glasses (600 px); the phone preview can use the screen scale.
-  static func render(_ f: HUDFrame, scale: CGFloat = 1) -> UIImage {
+  static func render(_ f: HUDFrame, sourceColors: [String: String] = HUDSettings.defaultSourceColors,
+                     scale: CGFloat = 1) -> UIImage {
     let format = UIGraphicsImageRendererFormat()
     format.scale = scale
     format.opaque = true
@@ -45,7 +51,7 @@ enum HUDImageRenderer {
       let c = ctx.cgContext
       UIColor.black.setFill()
       c.fill(CGRect(origin: .zero, size: size))
-      draw(f, in: c)
+      draw(f, sourceColors: sourceColors, in: c)
     }
   }
 
@@ -170,7 +176,7 @@ enum HUDImageRenderer {
     }
   }
 
-  private static func draw(_ f: HUDFrame, in c: CGContext) {
+  private static func draw(_ f: HUDFrame, sourceColors: [String: String], in c: CGContext) {
     let W = size.width, H = size.height
 
     // Ground layer first, so labels draw over it: tracks, then the route.
@@ -236,7 +242,9 @@ enum HUDImageRenderer {
     for item in f.items.sorted(by: { $0.rangeNm < $1.rangeNm }) {
       let x = CGFloat(item.x) * W
       let y = min(max(CGFloat(item.y) * H, 110), H - 30)
-      let col = item.severity == .normal && item.source == "ARPA" ? arpa : color(item.severity)
+      // Alarms are amber or red; otherwise each target source has its own colour.
+      let col = item.severity == .normal
+        ? (item.source.flatMap { sourceColors[$0] }.flatMap { color(hex: $0) } ?? hud) : color(item.severity)
 
       c.setStrokeColor(col.cgColor)
       c.setLineWidth(3)

@@ -63,6 +63,7 @@ final class AppModel {
     if let v = d.object(forKey: "showTracks") as? Bool { s.showTracks = v }
     if let v = d.object(forKey: "trackRangeNm") as? Double { s.trackRangeNm = v }
     if let v = d.stringArray(forKey: "hiddenSources") { s.hiddenSources = Set(v) }
+    if let v = d.dictionary(forKey: "sourceColors") as? [String: String] { s.sourceColors.merge(v) { $1 } }
     hud = s
     head.reverseDirection = d.bool(forKey: "reverseDirection")
     if let src = HeadSource(rawValue: d.string(forKey: "headSource") ?? "") { head.source = src }
@@ -107,6 +108,7 @@ final class AppModel {
     defaults.set(hud.showTracks, forKey: "showTracks")
     defaults.set(hud.trackRangeNm, forKey: "trackRangeNm")
     defaults.set(Array(hud.hiddenSources), forKey: "hiddenSources")
+    defaults.set(hud.sourceColors, forKey: "sourceColors")
   }
 
   private func applyDataSource() {
@@ -197,7 +199,7 @@ final class AppModel {
 
     let now = Date()
     if now.timeIntervalSince(lastPreviewAt) > 0.1 {
-      preview = HUDImageRenderer.render(f, scale: 1)
+      preview = HUDImageRenderer.render(f, sourceColors: hud.sourceColors, scale: 1)
       lastPreviewAt = now
     }
 
@@ -207,7 +209,7 @@ final class AppModel {
     guard f != lastSentFrame || now.timeIntervalSince(lastSentAt) > 2 else { return }
     lastSentFrame = f
     lastSentAt = now
-    let image = lensMode == .picture ? (preview ?? HUDImageRenderer.render(f)) : nil
+    let image = lensMode == .picture ? (preview ?? HUDImageRenderer.render(f, sourceColors: hud.sourceColors)) : nil
     let mode = lensMode
     Task { await self.glasses.send(frame: f, mode: mode, image: image) }
   }

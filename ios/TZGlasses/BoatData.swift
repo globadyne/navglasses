@@ -66,7 +66,9 @@ struct Target: Decodable, Sendable {
   var name: String?
   var kind: String?        // "vessel" or "aton"
   var typeLabel: String?   // "Cargo", "Sailing"... (raw AIS only, not TTM)
-  var source: String?      // "TTM" when it came from TimeZero 4's tracked targets
+  var source: String?      // "AIS", "ARPA", "TTM", or "ONLINE" for internet AIS (TimeZero 5)
+  /// Seconds since the last position report. Online AIS can be minutes old.
+  var ageS: Double?
   var lat: Double?
   var lon: Double?
   var sog: Double?

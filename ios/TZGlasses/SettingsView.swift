@@ -77,12 +77,14 @@ struct SettingsView: View {
         }
 
         Section {
-          sourceToggle("AIS", key: "AIS")
-          sourceToggle("ARPA (radar)", key: "ARPA")
+          sourceRow("AIS", key: "AIS")
+          sourceRow("ARPA (radar)", key: "ARPA")
+          sourceRow("Online AIS", key: "ONLINE")
+          Button("Reset colours") { model.hud.sourceColors = HUDSettings.defaultSourceColors }
         } header: {
           Text("Targets")
         } footer: {
-          Text("ARPA targets are boats tracked by your radar, including ones without AIS. They show in orange; AIS targets in green. Hidden targets don't raise collision alarms.")
+          Text("ARPA targets are boats tracked by your radar, including ones without AIS. Online AIS comes over the internet (TimeZero 5) and can be minutes old: it always shows its age and never raises a collision alarm. Hidden targets don't raise alarms either. Colours apply in Picture mode; alarms always show amber or red.")
         }
 
         Section("Collision alarms") {
@@ -123,6 +125,25 @@ struct SettingsView: View {
       .toolbar { Button("Done") { dismiss() } }
       .onAppear { address = model.bridgeAddress }
     }
+  }
+
+  /// Show/hide switch and label colour for one target source.
+  private func sourceRow(_ title: String, key: String) -> some View {
+    HStack {
+      ColorPicker("", selection: Binding(
+        get: { Color(HUDImageRenderer.color(hex: model.hud.sourceColors[key] ?? "") ?? .white) },
+        set: { model.hud.sourceColors[key] = Self.hex(UIColor($0)) }
+      ), supportsOpacity: false)
+      .labelsHidden()
+      sourceToggle(title, key: key)
+    }
+  }
+
+  private static func hex(_ c: UIColor) -> String {
+    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+    c.getRed(&r, green: &g, blue: &b, alpha: &a)
+    func byte(_ v: CGFloat) -> Int { Int((min(max(v, 0), 1) * 255).rounded()) }
+    return String(format: "#%02x%02x%02x", byte(r), byte(g), byte(b))
   }
 
   private func sourceToggle(_ title: String, key: String) -> some View {
