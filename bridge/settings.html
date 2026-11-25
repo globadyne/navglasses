@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TZ Bridge Settings</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --text: #1f1e1b; --muted: #6b6a64; --line: #e3e1d9;
+    --accent: #0f6e56; --danger-bg: #fcebeb; --danger: #a32d2d; --field: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161615; --card: #1f1f1d; --text: #ecebe6; --muted: #9c9a92; --line: #2f2e2b;
+      --accent: #5dcaa5; --danger-bg: #501313; --danger: #f7c1c1; --field: #262624; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  a { color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .help { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input, select { font: inherit; color: var(--text); background: var(--field); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 9px; min-width: 0; }
+  input[type=checkbox] { width: 18px; height: 18px; vertical-align: -3px; margin-right: 8px; }
+  .wide { width: 100%; }
+  .input-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--line); }
+  .input-row:first-child { border-top: 0; }
+  .input-row .grow { flex: 1 1 160px; }
+  button { font: inherit; border-radius: 8px; padding: 7px 14px; cursor: pointer; border: 1px solid var(--line);
+    background: var(--card); color: var(--text); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.link { border: 0; background: none; color: var(--muted); padding: 7px 4px; }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .msg { padding: 10px 12px; border-radius: 8px; margin-bottom: 14px; }
+  .msg.err { background: var(--danger-bg); color: var(--danger); }
+  .msg.ok { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+  code { font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>TZ Bridge Settings</h1>
+    <a href="/">Back to status</a>
+  </header>
+
+  <div id="msg" hidden></div>
+
+  <div class="card">
+    <h2>Where the NMEA comes from</h2>
+    <p class="help">Add one input for each place data arrives. Use the same speed as the sending device:
+      usually 4800 for GPS, compass and instruments, 38400 for AIS. "Auto" finds the speed by itself.
+      If TimeZero is on this PC, give it a serial output on one end of a virtual COM pair (com0com)
+      and pick the other end here, or use a TCP output.</p>
+    <div id="inputs"></div>
+    <div class="actions" style="margin-top: 8px">
+      <button type="button" data-add="serial">+ COM port</button>
+      <button type="button" data-add="tcp">+ TCP</button>
+      <button type="button" data-add="udp">+ UDP</button>
+      <button type="button" class="link" id="refresh">Refresh COM port list</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>TimeZero marks, routes and tracks</h2>
+    <p class="help">Read live from TimeZero's database (never changed). Tracks are found next to it.</p>
+    <label for="tzdb">UserObjects.tzdb</label>
+    <input id="tzdb" class="wide" placeholder="C:\ProgramData\TimeZero\DATA\UserObjects.tzdb">
+    <div id="tzdbHint" class="muted"></div>
+    <label for="gpx">GPX files or folders (optional, one per line)</label>
+    <textarea id="gpx" class="wide" rows="2" style="font: inherit; color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px"></textarea>
+    <label for="markRange">Send marks within (nm)</label>
+    <input id="markRange" type="number" min="1" max="100" step="1" style="width: 110px">
+  </div>
+
+  <div class="card">
+    <h2>Phone connection</h2>
+    <p class="help">The phone app connects to this PC on this port. Type one of these addresses into the app:
+      <span id="addresses"></span></p>
+    <label for="webPort">Port</label>
+    <input id="webPort" type="number" min="1" max="65535" style="width: 110px">
+  </div>
+
+  <div class="card">
+    <h2>Troubleshooting</h2>
+    <label><input type="checkbox" id="record">Save the raw NMEA to a log file</label>
+    <div class="muted" id="recordHint"></div>
+  </div>
+
+  <div class="actions">
+    <button type="button" class="primary" id="save">Save and restart inputs</button>
+    <span class="muted" id="where"></span>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let info = null;
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function show(text, ok) {
+  const m = $("msg");
+  m.hidden = !text;
+  m.className = "msg " + (ok ? "ok" : "err");
+  m.textContent = text || "";
+}
+
+function portOptions(selected) {
+  const ports = info.ports.slice();
+  if (selected && !ports.some((p) => p.device === selected)) ports.push({ device: selected, description: "not found now" });
+  if (!ports.length) return `<option value="">No COM ports found</option>`;
+  return `<option value="">Choose…</option>` + ports.map((p) =>
+    `<option value="${esc(p.device)}" ${p.device === selected ? "selected" : ""}>${esc(p.device)}${p.description ? " · " + esc(p.description) : ""}</option>`).join("");
+}
+
+function rowHtml(i) {
+  const remove = `<button type="button" class="link" data-remove>Remove</button>`;
+  if (i.type === "serial") {
+    return `<strong style="width: 60px">COM</strong>
+      <select class="grow" data-k="port">${portOptions(i.port)}</select>
+      <select data-k="baud">${info.bauds.map((b) => `<option value="${b}" ${String(i.baud) === b ? "selected" : ""}>${b === "auto" ? "Auto" : b + " baud"}</option>`).join("")}</select>
+      ${remove}`;
+  }
+  if (i.type === "tcp") {
+    return `<strong style="width: 60px">TCP</strong>
+      <input class="grow" data-k="host" placeholder="Address, e.g. 127.0.0.1" value="${esc(i.host || "")}">
+      <input data-k="port" type="number" min="1" max="65535" placeholder="Port" style="width: 110px" value="${esc(i.port || "")}">
+      ${remove}`;
+  }
+  return `<strong style="width: 60px">UDP</strong>
+    <span class="grow muted">Listen on port</span>
+    <input data-k="port" type="number" min="1" max="65535" style="width: 110px" value="${esc(i.port || "")}">
+    ${remove}`;
+}
+
+function addRow(i) {
+  const div = document.createElement("div");
+  div.className = "input-row";
+  div.dataset.type = i.type;
+  div.innerHTML = rowHtml(i);
+  div.querySelector("[data-remove]").onclick = () => div.remove();
+  $("inputs").appendChild(div);
+}
+
+function readRows() {
+  return [...$("inputs").children].map((div) => {
+    const i = { type: div.dataset.type };
+    div.querySelectorAll("[data-k]").forEach((el) => { i[el.dataset.k] = el.value.trim(); });
+    if (i.port !== undefined && div.dataset.type !== "serial") i.port = Number(i.port);
+    return i;
+  });
+}
+
+function render() {
+  const c = info.config || {};
+  $("inputs").innerHTML = "";
+  (c.inputs || []).forEach(addRow);
+  if (!(c.inputs || []).length) $("inputs").innerHTML = `<p class="muted" id="none">No inputs yet. Add one below.</p>`;
+  $("tzdb").value = c.tzdb || "";
+  $("tzdbHint").textContent = info.tzdb_found ? `TimeZero's database was found at ${info.default_tzdb}.` :
+    "TimeZero's database wasn't found in the usual place. Leave this empty if TimeZero isn't on this PC.";
+  $("gpx").value = (c.gpx || []).join("\n");
+  $("markRange").value = c.mark_range ?? 10;
+  $("webPort").value = c.web_port ?? 8080;
+  $("record").checked = !!c.record;
+  $("recordHint").textContent = info.config_path ? `Saved as nmea-log.txt next to ${info.config_path}. Send it to support if data looks wrong.` : "";
+  $("addresses").innerHTML = info.addresses.map((a) => `<code>${esc(a)}</code>`).join(" or ");
+  $("where").textContent = info.config_path ? `Settings file: ${info.config_path}` : "";
+  const editable = info.editable;
+  document.querySelectorAll("input, select, textarea, button").forEach((el) => { if (el.id !== "refresh") el.disabled = !editable; });
+  if (!info.config_path) show("This bridge was started from the command line, so its settings are the options it was started with. The installed bridge uses this page.", false);
+  else if (!editable) show("Settings can only be changed on the nav PC itself (open http://localhost:" + (c.web_port ?? 8080) + "/settings there).", false);
+}
+
+async function load() {
+  const r = await fetch("/api/config", { cache: "no-store" });
+  info = await r.json();
+  render();
+}
+
+document.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => {
+  $("none")?.remove();
+  const t = b.dataset.add;
+  addRow(t === "serial" ? { type: t, port: "", baud: "4800" } : t === "tcp" ? { type: t, host: "127.0.0.1", port: "" } : { type: t, port: 10110 });
+});
+
+$("refresh").onclick = async () => {
+  const keep = readRows();
+  const r = await fetch("/api/config", { cache: "no-store" });
+  info.ports = (await r.json()).ports;
+  $("inputs").innerHTML = "";
+  keep.forEach(addRow);
+};
+
+$("save").onclick = async () => {
+  const body = {
+    inputs: readRows(),
+    tzdb: $("tzdb").value.trim(),
+    gpx: $("gpx").value.split("\n").map((s) => s.trim()).filter(Boolean),
+    mark_range: Number($("markRange").value || 10),
+    web_port: Number($("webPort").value || 8080),
+    record: $("record").checked,
+  };
+  show("");
+  $("save").disabled = true;
+  try {
+    const r = await fetch("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const res = await r.json();
+    if (!r.ok) { show(res.error || "Couldn't save the settings.", false); $("save").disabled = false; return; }
+    show("Saved. Restarting the inputs…", true);
+    const port = res.web_port;
+    const base = port === Number(location.port || 80) ? "" : `${location.protocol}//${location.hostname}:${port}`;
+    setTimeout(() => { location.href = base + "/"; }, 2500);
+  } catch (e) {
+    show("Couldn't reach the bridge: " + e.message, false);
+    $("save").disabled = false;
+  }
+};
+
+load().catch((e) => show("Couldn't load the settings: " + e.message, false));
+</script>
+</body>
+</html>

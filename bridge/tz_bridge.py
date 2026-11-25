@@ -33,9 +33,11 @@ import asyncio
 import json
 import logging
 import math
+import os
 import socket
 import sqlite3
 import struct
+import sys
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -45,7 +47,114 @@ import pyais
 from aiohttp import web, WSMsgType
 
 log = logging.getLogger("tz_bridge")
-HERE = Path(__file__).resolve().parent
+# Where status.html and settings.html live: next to this script, or inside the packaged .exe.
+HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+FROZEN = getattr(sys, "frozen", False)
+DEFAULT_TZDB = Path(r"C:\ProgramData\TimeZero\DATA\UserObjects.tzdb")
+DEFAULT_CONFIG = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "TZ Glasses Bridge" / "config.json"
+BAUDS = ("4800", "9600", "19200", "38400", "57600", "115200", "auto")
+
+
+# ---------------------------------------------------------------- settings file
+# The installed bridge (a Windows service) has no command line to speak of: everything comes
+# from config.json, edited on the Settings page. Command-line options still work and win.
+def default_config():
+    return {
+        "inputs": [],          # {"type": "serial", "port": "COM11", "baud": "4800"} | tcp {host, port} | udp {port}
+        "tzdb": str(DEFAULT_TZDB) if DEFAULT_TZDB.exists() else "",
+        "gpx": [],
+        "web_port": 8080,
+        "mark_range": 10.0,
+        "record": False,       # save the raw NMEA next to config.json (nmea-log.txt)
+    }
+
+
+def load_config(path):
+    cfg = default_config()
+    try:
+        with open(path, encoding="utf-8") as f:
+            cfg.update(json.load(f))
+    except FileNotFoundError:
+        save_config(path, cfg)
+        log.info("Created settings file %s", path)
+    except (OSError, ValueError) as e:
+        log.warning("Couldn't read settings %s (%s); using defaults", path, e)
+    return cfg
+
+
+def save_config(path, cfg):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    os.replace(tmp, path)  # never leave a half-written file
+
+
+def validate_config(c):
+    """Checks a config posted by the Settings page. Returns (clean config, error or None)."""
+    out = default_config()
+    try:
+        inputs = []
+        for i in c.get("inputs", []):
+            t = i.get("type")
+            if t == "serial":
+                port, baud = str(i.get("port", "")).strip(), str(i.get("baud", "4800")).lower()
+                if not port:
+                    return None, "Choose a COM port for each serial input."
+                if baud not in BAUDS:
+                    return None, f"Unknown speed {baud}."
+                inputs.append({"type": "serial", "port": port, "baud": baud})
+            elif t == "tcp":
+                host, port = str(i.get("host", "")).strip(), int(i.get("port", 0))
+                if not host or not 0 < port < 65536:
+                    return None, "Each TCP input needs an address and a port (1 to 65535)."
+                inputs.append({"type": "tcp", "host": host, "port": port})
+            elif t == "udp":
+                port = int(i.get("port", 0))
+                if not 0 < port < 65536:
+                    return None, "Each UDP input needs a port (1 to 65535)."
+                inputs.append({"type": "udp", "port": port})
+            else:
+                return None, f"Unknown input type {t!r}."
+        out["inputs"] = inputs
+        out["tzdb"] = str(c.get("tzdb", "")).strip()
+        out["gpx"] = [str(g).strip() for g in c.get("gpx", []) if str(g).strip()]
+        out["web_port"] = int(c.get("web_port", 8080))
+        if not 1 <= out["web_port"] < 65536:
+            return None, "The web port must be 1 to 65535."
+        out["mark_range"] = float(c.get("mark_range", 10))
+        out["record"] = bool(c.get("record", False))
+    except (TypeError, ValueError, AttributeError) as e:
+        return None, f"Invalid settings: {e}"
+    return out, None
+
+
+def apply_config(args, cfg, config_path):
+    """Fills in args from the settings file, except options given on the command line."""
+    if not (args.serial or args.udp or args.tcp or args.replay):
+        args.serial = [f"{i['port']}:{i['baud']}" for i in cfg["inputs"] if i["type"] == "serial"]
+        args.tcp = [f"{i['host']}:{i['port']}" for i in cfg["inputs"] if i["type"] == "tcp"]
+        args.udp = [i["port"] for i in cfg["inputs"] if i["type"] == "udp"]
+    if args.tzdb is None and cfg.get("tzdb"):
+        args.tzdb = cfg["tzdb"]
+    if not args.gpx and cfg.get("gpx"):
+        args.gpx = list(cfg["gpx"])
+    if args.port is None:
+        args.port = cfg["web_port"]
+    if args.mark_range is None:
+        args.mark_range = cfg["mark_range"]
+    if args.record is None and cfg.get("record"):
+        args.record = str(Path(config_path).parent / "nmea-log.txt")
+
+
+def list_serial_ports():
+    try:
+        from serial.tools import list_ports
+        return [{"device": p.device, "description": p.description or ""}
+                for p in sorted(list_ports.comports(), key=lambda p: (len(p.device), p.device))]
+    except Exception as e:  # pyserial missing or the OS refused
+        log.warning("Couldn't list COM ports: %s", e)
+        return []
 
 OWN_FIELD_MAX_AGE = 30        # s: drop own-ship values not refreshed
 TARGET_MAX_AGE = 6 * 60       # s: drop AIS vessels not heard from
@@ -967,11 +1076,50 @@ async def replay_reader(path, rate, push):
 
 
 # ---------------------------------------------------------------- server
-def build_app(state, interval):
+def build_app(state, interval, control=None):
     clients = set()
+    control = control or {}
 
     async def index(_):
         return web.FileResponse(HERE / "status.html")
+
+    async def settings_page(_):
+        return web.FileResponse(HERE / "settings.html")
+
+    async def get_config(request):
+        path = control.get("config_path")
+        cfg = load_config(path) if path else None
+        return web.json_response({
+            "config": cfg,
+            "config_path": str(path) if path else None,
+            # Settings can be changed only on the nav PC itself, not by anyone on the boat's WiFi.
+            "editable": bool(path) and request.remote in ("127.0.0.1", "::1"),
+            "running": control.get("running"),
+            "ports": list_serial_ports(),
+            "tzdb_found": DEFAULT_TZDB.exists(),
+            "default_tzdb": str(DEFAULT_TZDB),
+            "bauds": BAUDS,
+            "addresses": [f"{ip}:{control.get('web_port', 8080)}" for ip in local_ips()],
+        })
+
+    async def post_config(request):
+        path = control.get("config_path")
+        if not path:
+            return web.json_response({"error": "This bridge was started from the command line, so its "
+                                               "settings are the options it was started with."}, status=409)
+        if request.remote not in ("127.0.0.1", "::1"):
+            return web.json_response({"error": "Settings can only be changed on the nav PC itself."}, status=403)
+        if request.content_type != "application/json":
+            return web.json_response({"error": "Expected JSON."}, status=415)
+        cfg, err = validate_config(await request.json())
+        if err:
+            return web.json_response({"error": err}, status=400)
+        save_config(path, cfg)
+        log.info("Settings saved; restarting inputs")
+        restart = control.get("restart")
+        if restart:
+            asyncio.get_running_loop().call_later(0.5, restart.set)  # after this reply has gone out
+        return web.json_response({"ok": True, "web_port": cfg["web_port"]})
 
     async def state_json(_):
         return web.json_response(state.snapshot())
@@ -1021,6 +1169,9 @@ def build_app(state, interval):
     app.router.add_get("/state.json", state_json)
     app.router.add_get("/userdata.json", userdata_json)
     app.router.add_get("/ws", ws_handler)
+    app.router.add_get("/settings", settings_page)
+    app.router.add_get("/api/config", get_config)
+    app.router.add_post("/api/config", post_config)
     app.cleanup_ctx.append(broadcaster)
     return app
 
@@ -1037,7 +1188,15 @@ def local_ips():
     return sorted(ips) or ["127.0.0.1"]
 
 
-async def main_async(args):
+async def main_async(args, control=None):
+    """Runs the bridge until stopped, or until control["restart"] is set (settings changed).
+    Returns True to be started again with new settings."""
+    control = control or {}
+    config_mode = bool(control.get("config_path"))
+    tasks = []
+    transports = []
+    restart = asyncio.Event()
+    control["restart"] = restart
     state = BoatState()
     state.mark_range = args.mark_range
     loop = asyncio.get_running_loop()
@@ -1051,7 +1210,7 @@ async def main_async(args):
                 except Exception as e:  # never let a bad file stop the bridge
                     log.warning("GPX check failed: %s", e)
                 await asyncio.sleep(5)
-        asyncio.create_task(watch_gpx())
+        tasks.append(asyncio.create_task(watch_gpx()))
 
     tz_tracks = args.tz_tracks
     if not tz_tracks and args.tzdb and (Path(args.tzdb).parent / "Tracks2.tzdb").exists():
@@ -1074,7 +1233,7 @@ async def main_async(args):
                     except (sqlite3.Error, OSError) as e:
                         log.warning("Couldn't read %s (will retry): %s", tz_tracks, e)  # TimeZero mid-write
                 await asyncio.sleep(5)
-        asyncio.create_task(watch_tz_tracks())
+        tasks.append(asyncio.create_task(watch_tz_tracks()))
 
     fwd = None
     if args.forward_udp:
@@ -1124,8 +1283,15 @@ async def main_async(args):
     for udp_port in args.udp or []:
         name = f"UDP {udp_port}"
         try:
-            await loop.create_datagram_endpoint(lambda p=pusher(name): UdpIn(p), local_addr=("0.0.0.0", udp_port))
+            tr, _ = await loop.create_datagram_endpoint(lambda p=pusher(name): UdpIn(p),
+                                                        local_addr=("0.0.0.0", udp_port))
+            transports.append(tr)
         except OSError as e:
+            if config_mode:  # a service must keep running: show the problem on the status page instead
+                state.inputs[name]["note"] = ("port in use by another program (often TimeZero itself); "
+                                              "use a virtual COM port or TCP instead")
+                log.warning("UDP port %d is in use by another program", udp_port)
+                continue
             raise SystemExit(
                 f"\nUDP port {udp_port} is already in use ({e.strerror}).\n"
                 "Another program is listening on it: often an earlier bridge still running in another window,\n"
@@ -1136,11 +1302,17 @@ async def main_async(args):
         log.info("Listening for NMEA on UDP %d", udp_port)
     for spec in args.tcp or []:
         host, port = spec.rsplit(":", 1)
-        asyncio.create_task(tcp_reader(host, int(port), pusher(f"TCP {spec}")))
+        tasks.append(asyncio.create_task(tcp_reader(host, int(port), pusher(f"TCP {spec}"))))
     if args.replay:
-        asyncio.create_task(replay_reader(args.replay, args.rate, pusher(f"replay {Path(args.replay).name}")))
+        tasks.append(asyncio.create_task(replay_reader(args.replay, args.rate, pusher(f"replay {Path(args.replay).name}"))))
 
-    app = build_app(state, args.interval)
+    if not (args.serial or args.udp or args.tcp or args.replay):
+        log.warning("No inputs set up yet: open the Settings page to choose where the NMEA comes from")
+    control["running"] = {"serial": args.serial or [], "tcp": args.tcp or [], "udp": args.udp or [],
+                          "tzdb": args.tzdb, "gpx": args.gpx or [], "record": args.record}
+    control["web_port"] = args.port
+
+    app = build_app(state, args.interval, control)
     runner = web.AppRunner(app)
     await runner.setup()
     try:
@@ -1153,9 +1325,16 @@ async def main_async(args):
         log.info("Status page:  http://%s:%d/", ip, args.port)
         log.info("Live stream:  ws://%s:%d/ws", ip, args.port)
     try:
-        await asyncio.Event().wait()
+        await restart.wait()
+        return True
     finally:
-        stop.set()
+        stop.set()  # serial threads close their ports within a second
+        for t in tasks:
+            t.cancel()
+        for tr in transports:
+            tr.close()
+        if rec:
+            rec.close()
         await runner.cleanup()
 
 
@@ -1180,19 +1359,37 @@ def main():
                                        "found automatically next to --tzdb")
     p.add_argument("--tz-track-range", type=float, default=10.0, help="send TimeZero tracks within this many nm")
     p.add_argument("--tz-track-points", type=int, default=20000, help="at most this many TimeZero track points")
-    p.add_argument("--mark-range", type=float, default=10.0, help="send marks within this many nm")
-    p.add_argument("--port", type=int, default=8080, help="HTTP/WebSocket port")
+    p.add_argument("--mark-range", type=float, help="send marks within this many nm (default 10)")
+    p.add_argument("--port", type=int, help="HTTP/WebSocket port (default 8080)")
     p.add_argument("--interval", type=float, default=0.5, help="seconds between live updates")
+    p.add_argument("--config", help="settings file, edited on the Settings page "
+                                     "(the installed bridge uses C:\\ProgramData\\TZ Glasses Bridge\\config.json)")
     p.add_argument("--record", help="also save the raw NMEA received to this file (appends; play it back with --replay)")
     p.add_argument("--forward-udp", help="also re-send raw NMEA to host:port (e.g. 255.255.255.255:10110)")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
-    if not (args.serial or args.udp or args.tcp or args.replay):
-        p.error("choose an input: --serial, --udp, --tcp or --replay")
+    # The packaged .exe with no inputs on its command line uses the settings file.
+    if not args.config and FROZEN and not (args.serial or args.udp or args.tcp or args.replay):
+        args.config = str(DEFAULT_CONFIG)
+    if not args.config and not (args.serial or args.udp or args.tcp or args.replay):
+        p.error("choose an input (--serial, --udp, --tcp or --replay), or use --config with the Settings page")
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    cli = vars(args).copy()
     try:
-        asyncio.run(main_async(args))
+        while True:
+            a = argparse.Namespace(**cli)
+            control = {}
+            if a.config:
+                control["config_path"] = a.config
+                apply_config(a, load_config(a.config), a.config)
+            if a.port is None:
+                a.port = 8080
+            if a.mark_range is None:
+                a.mark_range = 10.0
+            if not asyncio.run(main_async(a, control)):
+                break
+            time.sleep(1)  # let serial ports close before reopening them
     except KeyboardInterrupt:
         pass
 
