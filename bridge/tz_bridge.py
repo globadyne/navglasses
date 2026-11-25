@@ -158,6 +158,10 @@ def list_serial_ports():
 
 OWN_FIELD_MAX_AGE = 30        # s: drop own-ship values not refreshed
 TARGET_MAX_AGE = 6 * 60       # s: drop AIS vessels not heard from
+# Merging TimeZero's TTM copy of an AIS ship into the receiver's own (VDM) report of it.
+SAME_SHIP_NM = 0.15           # positions this close…
+SAME_SHIP_KN = 2.0            # …and speeds this close count as the same ship
+ONLINE_AFTER_S = 90           # a TimeZero AIS target the receiver hasn't matched in this long is taken as online AIS
 ATON_MAX_AGE = 20 * 60        # s: aids to navigation report less often
 TRACK_MAX_POINTS = 2000       # per track, after thinning
 OWN_TRACK_MIN_NM = 0.01       # record own breadcrumb every ~20 m
@@ -588,6 +592,9 @@ class BoatState:
         self.targets = {}
         self.own_mmsi = None
         self.frag = {}
+        # When an AIS receiver feeds the bridge directly (VDM): last heard, and since when without a gap.
+        self.vdm_last = None
+        self.vdm_since = None
         self.stats = {"lines": 0, "bad_checksum": 0, "ais_decoded": 0, "ais_errors": 0}
         self.inputs = {}  # input name -> {"lines", "last", "note"}, shown on the status page
         self.sentence_counts = {}
@@ -765,7 +772,7 @@ class BoatState:
             if hdg is None:
                 return
             brg = (brg + hdg) % 360
-        t = self.targets.setdefault(key, {"mmsi": None, "kind": "vessel"})
+        t = self.targets.setdefault(key, {"mmsi": None, "kind": "vessel", "first": time.time()})
         # Field 15, type of acquisition: A = automatic, M = manual (both radar ARPA),
         # R = reported (an AIS target passed through the same sentence).
         acq = f[15][:1] if len(f) > 15 else ""
@@ -841,6 +848,10 @@ class BoatState:
         self._update_target(mmsi, msg)
 
     def _update_target(self, mmsi, m):
+        now = time.time()
+        if self.vdm_last is None or now - self.vdm_last > 60:
+            self.vdm_since = now
+        self.vdm_last = now
         t = self.targets.setdefault(mmsi, {"mmsi": mmsi, "kind": "vessel", "source": "AIS"})
         mtype = m.get("msg_type")
         lat, lon = m.get("lat"), m.get("lon")
@@ -870,6 +881,54 @@ class BoatState:
             t["type_label"] = ship_type_label(st)
         t["seen"] = time.time()
 
+    def _merged_targets(self, now):
+        """Targets with TimeZero's TTM copies of AIS ships folded into the receiver's own reports.
+
+        With an AIS receiver feeding the bridge directly (VDM) as well as TimeZero (TTM), each
+        ship would arrive twice. A TTM target reported as AIS (acquisition R, or no field) is
+        dropped when a VDM target has the same name, or sits within SAME_SHIP_NM with a speed
+        within SAME_SHIP_KN. Radar (ARPA) targets are always kept: the receiver can't see them.
+
+        One the receiver still hasn't matched after ONLINE_AFTER_S, while it's been running
+        that long, came from somewhere the receiver can't hear: in practice TimeZero's online
+        AIS. Those are tagged source ONLINE (no age, no collision alarm in the app)."""
+        for t in self.targets.values():          # re-decided every time, from scratch
+            if t.pop("online_guess", None):
+                t["source"] = "AIS"
+        vdm = [t for t in self.targets.values() if t.get("mmsi") is not None and "lat" in t]
+        receiving = self.vdm_last is not None and now - self.vdm_last <= 60
+        if not receiving:
+            return list(self.targets.values())
+
+        def norm(n):
+            return " ".join((n or "").upper().split())
+
+        names = {norm(t.get("name")): t for t in vdm if norm(t.get("name"))}
+        out = []
+        for key, t in self.targets.items():
+            if not str(key).startswith("ttm-") or t.get("source") not in ("AIS", "TTM", "ONLINE"):
+                out.append(t)
+                continue
+            match = names.get(norm(t.get("name")))
+            if match is None and "lat" in t:
+                for v in vdm:
+                    d = math.hypot(v["lat"] - t["lat"],
+                                   (v["lon"] - t["lon"]) * math.cos(math.radians(t["lat"]))) * 60
+                    if d <= SAME_SHIP_NM and abs((v.get("sog") or 0) - (t.get("sog") or 0)) <= SAME_SHIP_KN:
+                        match = v
+                        break
+            if match is not None:
+                if not match.get("name") and t.get("name") and not t["name"].startswith("Target "):
+                    match["name"] = t["name"]
+                t["source"] = "AIS"
+                t.pop("online_guess", None)
+                continue
+            if (now - t.get("first", now) >= ONLINE_AFTER_S
+                    and now - (self.vdm_since or now) >= ONLINE_AFTER_S):
+                t["source"], t["online_guess"] = "ONLINE", True
+            out.append(t)
+        return out
+
     # -- output
     def snapshot(self):
         now = time.time()
@@ -884,11 +943,14 @@ class BoatState:
             del self.frag[k]
 
         targets = []
-        for t in self.targets.values():
+        for t in self._merged_targets(now):
             if "lat" not in t:
                 continue
-            out = {k: v for k, v in t.items() if k not in ("pos_t", "seen")}
-            out["age_s"] = round(now - t.get("pos_t", t["seen"]), 1)
+            out = {k: v for k, v in t.items() if k not in ("pos_t", "seen", "first", "online_guess")}
+            if t.get("online_guess"):
+                out.pop("age_s", None)        # TimeZero doesn't say how old an online report is
+            else:
+                out["age_s"] = round(now - t.get("pos_t", t["seen"]), 1)
             if "lat" in own and "lon" in own:
                 rng, brg, cpa, tcpa = rel_geometry(own, t)
                 out["range_nm"] = round(rng, 3)

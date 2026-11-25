@@ -183,7 +183,9 @@ Usual speeds: GPS, compass, depth and wind instruments at **4800**; AIS receiver
 
 **NMEA 2000.** The bridge reads NMEA 0183. To use NMEA 2000 data, either let TimeZero read the network (it supports Actisense NGT-1) and pass it on in its output, or use a gateway that converts NMEA 2000 to 0183 (Actisense NGW-1 on a COM port, or a W2K-1 WiFi gateway set to send NMEA 0183 over TCP or UDP), and add it as another input.
 
-**AIS straight from the receiver.** If TimeZero won't repeat AIS, run the bridge with two inputs: TimeZero on the virtual COM port, and the AIS receiver on its own COM port or WiFi gateway.
+**AIS straight from the receiver.** If TimeZero won't repeat AIS, run the bridge with two inputs: TimeZero on the virtual COM port, and the AIS receiver on its own COM port or WiFi gateway. A transponder's NMEA 0183 output (for example an Icom MA-510TR, 38400 baud) can drive a second USB-serial adapter wired in parallel with TimeZero's, so the bridge gets every ship with its type and size, not only the ones TimeZero sends as TTM.
+
+With both, each AIS ship would arrive twice, so the bridge merges them: a TimeZero target reported as AIS is folded into the receiver's report of the same ship (same name, or within 0.15 nm with speed within 2 kn). Radar (ARPA) targets from TimeZero are always kept. A TimeZero AIS target the receiver still hasn't matched after 90 seconds (with the receiver running) came from somewhere the receiver can't hear, in practice TimeZero's online AIS, so it's tagged `ONLINE`: the glasses show it with "ONLINE" and never use it for collision alarms. If the receiver goes quiet for a minute, the bridge stops guessing.
 
 **Record a test log:** `python nmea_sim.py --stdout > test.nmea`, then stop it with Ctrl+C.
 
