@@ -312,14 +312,21 @@ TZ_POINT, TZ_ROUTE = 0, 5
 
 
 def tz_geometry(blob):
-    """TimeZero geometry: 1 type byte, then (lon, lat) pairs as big-endian int32,
-    each scaled so 2^31 = 180 degrees."""
+    """TimeZero geometry: 1 type byte, then (x, y) pairs as big-endian int32 Web Mercator
+    centimetres (the same projection as Tracks2.tzdb, which uses metres). Some marks carry
+    4 more bytes after their point; they're ignored.
+
+    Not degrees: read as 2^31 = 180 degrees, positions look plausible in Nova Scotia but are
+    wrong, and the error grows with latitude (a mark at 66 N came out at 83 N). Checked
+    2026-11-25: a customer's 84 marks land within 1 nm of their own Tracks2 track as
+    centimetres, and more than 10 nm from it as degrees."""
     if not blob or len(blob) < 9:
         return None, []
     pts = []
     for i in range(1, len(blob) - 7, 8):
         x, y = struct.unpack(">ii", blob[i:i + 8])
-        pts.append({"lat": round(y / 2**31 * 180, 7), "lon": round(x / 2**31 * 180, 7)})
+        lat, lon = merc_to_latlon(x / 100, y / 100)
+        pts.append({"lat": round(lat, 7), "lon": round(lon, 7)})
     return blob[0], pts
 
 
