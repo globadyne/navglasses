@@ -1029,9 +1029,14 @@ def serial_reader(port, baud, push, stop, note=lambda s: None):
                     if raw:
                         push(raw.decode("ascii", errors="ignore"))
         except Exception as e:
-            note(f"can't open: {e}")
+            if stop.is_set():
+                return
+            try:
+                note(f"can't open: {e}")
+            except RuntimeError:  # the bridge is restarting
+                return
             log.warning("Serial %s: %s (retrying in 3 s)", port, e)
-            time.sleep(3)
+            stop.wait(3)
 
 
 class UdpIn(asyncio.DatagramProtocol):
@@ -1276,10 +1281,13 @@ async def main_async(args, control=None):
         return threadsafe(note)
 
     stop = threading.Event()
+    serial_threads = []
     for spec in args.serial or []:
         port, baud = parse_serial_spec(spec, args.baud)
-        threading.Thread(target=serial_reader, args=(port, baud, threadsafe(pusher(port)), stop, noter(port)),
-                         daemon=True).start()
+        th = threading.Thread(target=serial_reader, args=(port, baud, threadsafe(pusher(port)), stop, noter(port)),
+                              daemon=True)
+        th.start()
+        serial_threads.append(th)
     for udp_port in args.udp or []:
         name = f"UDP {udp_port}"
         try:
@@ -1328,7 +1336,12 @@ async def main_async(args, control=None):
         await restart.wait()
         return True
     finally:
-        stop.set()  # serial threads close their ports within a second
+        stop.set()
+        # Wait until every COM port is really closed, so a restart can open them again.
+        for th in serial_threads:
+            await loop.run_in_executor(None, th.join, 5)
+            if th.is_alive():
+                log.warning("A serial port is slow to close; it will be retried")
         for t in tasks:
             t.cancel()
         for tr in transports:
