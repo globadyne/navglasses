@@ -8,3 +8,7 @@ ios/TZGlasses.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 # Python
 __pycache__/
 *.pyc
+# Bridge packaging
+dist/
+bridge/installer/tz-bridge-service.exe
+*.spec.bak

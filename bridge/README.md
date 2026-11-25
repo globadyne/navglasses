@@ -27,11 +27,45 @@ For every AIS target, it works out range, true bearing, bearing relative to your
 
 ## 1. Install (nav PC, Windows)
 
+### With the installer (recommended)
+
+1. Download **TZ-Glasses-Bridge-Setup-x.y.z.exe**: from the repo's **Releases**, or from the latest
+   "Bridge installer" run under **Actions** (Artifacts, at the bottom of the run).
+2. Run it. It installs the bridge as a Windows service named **TZ Glasses Bridge** that starts with
+   Windows and restarts itself if it ever stops, and lets phones reach it through the firewall.
+   Nothing else is needed: Python and everything the bridge uses are inside.
+3. The Settings page opens at the end (later: Start menu → **TZ Glasses Bridge Settings**, or
+   http://localhost:8080/settings). Add where the NMEA comes from (for example the virtual COM port
+   TimeZero sends to, and its speed) and press **Save**. TimeZero's database is found automatically.
+4. The status page (Start menu → **TZ Glasses Bridge**) shows each input's line count and the
+   address to type into the phone app.
+
+Settings are kept in `C:\ProgramData\TZ Glasses Bridge\config.json` and survive upgrades: run a newer
+installer over the old one. The service log is in `C:\ProgramData\TZ Glasses Bridge\logs`. Settings can
+only be changed from the nav PC itself; phones on the WiFi can view the status page but not change it.
+
+The installer isn't code-signed yet, so Windows SmartScreen says "Windows protected your PC": choose
+**More info → Run anyway**.
+
+### From source (for development)
+
 1. Install Python 3.10 or newer from python.org. Tick "Add Python to PATH."
 2. Open a Command Prompt in this folder and run:
    ```
    pip install -r requirements.txt
    ```
+3. Run it with command-line options (below), or with `--config my-settings.json` to use the Settings page.
+
+Stop the installed service first if it's running (`services.msc`, or the installer's uninstaller), since
+both want port 8080.
+
+### Building the installer
+
+`.github/workflows/bridge-installer.yml` builds it on GitHub's Windows machines on every change to
+`bridge/`, then tests it: replays sample NMEA through the packaged .exe, installs it as a service,
+saves settings through the API, checks live data arrives, and uninstalls. Push a tag like
+`bridge-v0.2.0` to publish a release. Pieces: PyInstaller (`installer/tz-bridge.spec`), WinSW as the
+service wrapper (`installer/tz-bridge-service.xml`), Inno Setup (`installer/TZGlassesBridge.iss`).
 
 ## 2. Test it without the boat
 

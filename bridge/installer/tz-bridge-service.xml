@@ -1,0 +1,23 @@
+<!--
+  Windows service definition for WinSW (https://github.com/winsw/winsw), which runs
+  tz-bridge.exe as a service: starts with Windows, restarts it if it ever stops,
+  and keeps its log. The installer puts WinSW next to this file as tz-bridge-service.exe.
+-->
+<service>
+  <id>TZGlassesBridge</id>
+  <name>TZ Glasses Bridge</name>
+  <description>Sends TimeZero navigation data to the TZ Glasses phone app. Settings: http://localhost:8080/settings</description>
+  <executable>%BASE%\tz-bridge\tz-bridge.exe</executable>
+  <arguments>--config "%ProgramData%\TZ Glasses Bridge\config.json"</arguments>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>10 sec</stoptimeout>
+  <logpath>%ProgramData%\TZ Glasses Bridge\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>2048</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+</service>

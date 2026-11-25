@@ -75,8 +75,13 @@ The user wants charted aids to navigation (buoys, beacons, lights) on the lens, 
 - Free fallback: OpenSeaMap seamarks (OSM `seamark:*` tags).
 - Live AIS AtoN (message 21) already comes through as `kind: "aton"`; de-duplicate charted aids against those by position.
 
+## Bridge installer (2026-11-25)
+
+- The installed bridge is a Windows service (WinSW wrapping the PyInstaller folder build `tz-bridge.exe`), configured by `C:\ProgramData\TZ Glasses Bridge\config.json` and the `/settings` page (`/api/config` GET/POST; POST only from localhost, JSON only). Saving restarts the inputs in-process (`main_async` returns True, `main` loops).
+- In config mode a busy UDP port is shown on the status page instead of exiting, so the service keeps running.
+- `.github/workflows/bridge-installer.yml` builds and tests the installer on `windows-latest` (packaged replay, silent install, service running, settings round-trip, uninstall). Tags `bridge-v*` publish a release. Not code-signed yet (SmartScreen warning); add a signing step when there's a certificate.
+
 ## Ideas not built yet
 
 - Predict head yaw ahead by the measured display latency (gyro rate × latency) so labels don't trail on fast turns.
 - Bonjour discovery of the bridge, so there's no IP to type.
-- Run the bridge as a Windows service.
