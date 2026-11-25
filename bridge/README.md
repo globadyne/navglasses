@@ -46,12 +46,19 @@ Open http://localhost:8080 in a browser. You should see heading, speed, depth, a
 
 ## 3. Connect TimeZero
 
-TimeZero can send NMEA over UDP, so no virtual COM port is needed.
+**Use a virtual COM port (recommended) or TCP, not UDP, when TimeZero and the bridge are on the same PC.** TimeZero's UDP connection also listens on the port it sends to, so a UDP output to `127.0.0.1` goes back to TimeZero itself, and the bridge can't open that port ("Only one usage of each socket address").
+
+**Virtual COM port:**
+1. Install **com0com** (the signed 64-bit build) and, in its Setup, rename the pair to e.g. **COM10** and **COM11**.
+2. In TimeZero's Connection Wizard, add a **serial output** on **COM10** (4800 baud; 38400 if there are many targets) and tick the sentences below.
+3. Run the bridge on the other end: `python tz_bridge.py --serial COM11:4800`. The speed must match TimeZero's (or use `COM11:auto`).
+
+**TCP:** add a TCP NMEA output in TimeZero (TimeZero as server, e.g. port 10120) and run `python tz_bridge.py --tcp 127.0.0.1:10120`. The bridge reconnects by itself when TimeZero restarts.
+
+**UDP** works when the bridge runs on a *different* PC: set TimeZero's UDP output to that PC's address, port 10110, and run `python tz_bridge.py --udp 10110` there.
 
 **In TimeZero's Connection Wizard:**
-1. Choose **Add/Configure UDP connection (advanced)**.
-2. Set it as an **output** to IP `127.0.0.1` (this same PC), port `10110`. If the bridge runs on a different PC, use that PC's address instead.
-3. Tick these output sentences:
+Tick these output sentences on whichever connection you use:
 
    | Tick | What the glasses use it for |
    |---|---|
@@ -77,8 +84,6 @@ python tz_bridge.py --udp 10110 --gpx "C:\Users\you\Documents\TZ Export"
 ```
 
 Check http://localhost:8080. The "Data feed" panel lists which sentence types are arriving, which is the quickest way to see what TimeZero is actually sending. TimeZero only sends targets and route data once it has a position, so connect the GPS (or run TimeZero's simulation mode) to see them.
-
-**Serial instead of UDP:** if you'd rather use a COM port, create a virtual COM pair with com0com, set TimeZero's output to one port at 38400 baud, and run `python tz_bridge.py --serial COM10 --baud 38400` on the other.
 
 **About AIS:** TimeZero 4 doesn't offer raw AIS (VDM) output, so it sends targets as TTM. The glasses get name, position, speed, course and CPA, but not vessel type. For vessel type, also feed the AIS receiver straight into the bridge: add `--serial COMx` or `--udp` for its port alongside the TimeZero input.
 
@@ -126,14 +131,23 @@ What the app gets:
 
 Try it with the included sample: `python tz_bridge.py --udp 10110 --gpx sample_tz_export.gpx` with the simulator running. You'll see four marks near Halifax Harbour.
 
-## Other inputs
+## Several inputs, each at its own speed
+
+Every input option can be repeated, and everything is merged into one picture. Each serial port takes its own speed after a colon; `auto` tries 4800, 38400, 9600, 115200, 19200 and 57600 until it finds clean sentences.
 
 ```
-python tz_bridge.py --udp 10110                   # NMEA over UDP (many WiFi gateways)
-python tz_bridge.py --tcp 192.168.1.50:10110      # NMEA TCP server
-python tz_bridge.py --replay mylog.nmea           # replay a recorded log
-python tz_bridge.py --serial COM10 --udp 10110    # several at once
+python tz_bridge.py --serial COM11:4800 --serial COM12:38400      # TimeZero at 4800, AIS receiver at 38400
+python tz_bridge.py --serial COM12:auto                           # find the speed by itself
+python tz_bridge.py --serial COM11:4800 --tcp 192.168.1.60:60001  # plus a WiFi gateway (e.g. Actisense W2K-1)
+python tz_bridge.py --udp 10110 --udp 10111                       # two UDP feeds
+python tz_bridge.py --replay mylog.nmea                           # replay a recorded log
 ```
+
+The status page's "Data feed" panel lists every input with its line count, speed and when it last sent something, so a silent or wrong-speed port stands out.
+
+Usual speeds: GPS, compass, depth and wind instruments at **4800**; AIS receivers and high-speed outputs at **38400**. If the same value (say heading) arrives from two inputs, the latest one wins, so feed each value from one place.
+
+**NMEA 2000.** The bridge reads NMEA 0183. To use NMEA 2000 data, either let TimeZero read the network (it supports Actisense NGT-1) and pass it on in its output, or use a gateway that converts NMEA 2000 to 0183 (Actisense NGW-1 on a COM port, or a W2K-1 WiFi gateway set to send NMEA 0183 over TCP or UDP), and add it as another input.
 
 **AIS straight from the receiver.** If TimeZero won't repeat AIS, run the bridge with two inputs: TimeZero on the virtual COM port, and the AIS receiver on its own COM port or WiFi gateway.
 

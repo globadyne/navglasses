@@ -19,6 +19,8 @@ at the file or folder with --gpx; it reloads automatically when you re-export.
 
 Examples
   python tz_bridge.py --serial COM10 --baud 38400
+  python tz_bridge.py --serial COM11:4800 --serial COM12:38400     (several inputs, each at its own speed)
+  python tz_bridge.py --serial COM12:auto                          (find the speed by itself)
   python tz_bridge.py --udp 10110
   python tz_bridge.py --tcp 192.168.1.50:10110
   python tz_bridge.py --replay sample.nmea
@@ -471,6 +473,7 @@ class BoatState:
         self.own_mmsi = None
         self.frag = {}
         self.stats = {"lines": 0, "bad_checksum": 0, "ais_decoded": 0, "ais_errors": 0}
+        self.inputs = {}  # input name -> {"lines", "last", "note"}, shown on the status page
         self.sentence_counts = {}
         self.last_rx = None
         self.user = UserData([])
@@ -823,6 +826,9 @@ class BoatState:
             "marks": marks,
             "userdata_version": max(self.user.version, self.tz_tracks_version),
             "stats": {**self.stats, "sentences": self.sentence_counts,
+                      "inputs": {k: {"lines": v["lines"], "note": v.get("note", ""),
+                                     "age_s": round(time.time() - v["last"], 1) if v["last"] else None}
+                                 for k, v in self.inputs.items()},
                       "marks_loaded": len(self.user.marks), "routes_loaded": len(self.user.routes),
                       "tracks_loaded": len(self.user.tracks), "gpx_errors": self.user.errors},
         }
@@ -862,17 +868,59 @@ class BoatState:
 
 
 # ---------------------------------------------------------------- inputs
-def serial_reader(port, baud, push, stop):
+AUTO_BAUDS = (4800, 38400, 9600, 115200, 19200, 57600)
+
+
+def parse_serial_spec(spec, default_baud):
+    """'COM11' -> (COM11, default); 'COM11:38400' -> (COM11, 38400); 'COM11:auto' -> (COM11, None)."""
+    port, _, b = spec.partition(":")
+    b = b or default_baud
+    return port, (None if str(b).lower() == "auto" else int(b))
+
+
+def _looks_like_nmea(raw: bytes) -> bool:
+    line = raw.decode("ascii", errors="ignore").strip()
+    return len(line) > 6 and line[0] in "$!" and checksum_ok(line)
+
+
+def detect_baud(ser, port, stop, note):
+    """Try the usual NMEA speeds until one gives clean sentences. Returns the baud or None."""
+    for baud in AUTO_BAUDS:
+        if stop.is_set():
+            return None
+        ser.baudrate = baud
+        ser.reset_input_buffer()
+        note(f"trying {baud} baud")
+        good, deadline = 0, time.time() + 3
+        while time.time() < deadline and not stop.is_set():
+            if _looks_like_nmea(ser.readline()):
+                good += 1
+                if good >= 2:
+                    log.info("%s: found NMEA at %d baud", port, baud)
+                    return baud
+    return None
+
+
+def serial_reader(port, baud, push, stop, note=lambda s: None):
+    """Reads one COM port. baud=None means detect it (tries the usual NMEA speeds)."""
     import serial  # pyserial
     while not stop.is_set():
         try:
-            with serial.Serial(port, baud, timeout=1) as ser:
-                log.info("Reading %s at %d baud", port, baud)
+            with serial.Serial(port, baud or AUTO_BAUDS[0], timeout=1) as ser:
+                use = baud or detect_baud(ser, port, stop, note)
+                if use is None:
+                    note("no NMEA at any speed")
+                    log.warning("%s: no NMEA found at %s baud (retrying)", port, "/".join(map(str, AUTO_BAUDS)))
+                    continue
+                ser.baudrate = use
+                note(f"{use} baud")
+                log.info("Reading %s at %d baud", port, use)
                 while not stop.is_set():
                     raw = ser.readline()
                     if raw:
                         push(raw.decode("ascii", errors="ignore"))
         except Exception as e:
+            note(f"can't open: {e}")
             log.warning("Serial %s: %s (retrying in 3 s)", port, e)
             time.sleep(3)
 
@@ -1042,7 +1090,11 @@ async def main_async(args):
         rec = open(args.record, "a", encoding="ascii", errors="ignore", newline="\r\n", buffering=1)
         log.info("Recording raw NMEA to %s", Path(args.record).resolve())
 
-    def push(line):
+    def push(line, src="input"):
+        if line.strip():
+            st = state.inputs.setdefault(src, {"lines": 0, "last": 0.0})
+            st["lines"] += 1
+            st["last"] = time.time()
         state.feed(line)
         if rec and line.strip():
             rec.write(line.strip() + "\n")
@@ -1052,30 +1104,41 @@ async def main_async(args):
             except OSError:
                 pass
 
-    def push_threadsafe(line):
-        loop.call_soon_threadsafe(push, line)
+    def pusher(src):
+        state.inputs.setdefault(src, {"lines": 0, "last": 0.0})
+        return lambda line: push(line, src)
+
+    def threadsafe(fn):
+        return lambda *a: loop.call_soon_threadsafe(fn, *a)
+
+    def noter(src):
+        def note(text):
+            state.inputs.setdefault(src, {"lines": 0, "last": 0.0})["note"] = text
+        return threadsafe(note)
 
     stop = threading.Event()
-    if args.serial:
-        threading.Thread(target=serial_reader, args=(args.serial, args.baud, push_threadsafe, stop),
+    for spec in args.serial or []:
+        port, baud = parse_serial_spec(spec, args.baud)
+        threading.Thread(target=serial_reader, args=(port, baud, threadsafe(pusher(port)), stop, noter(port)),
                          daemon=True).start()
-    if args.udp:
+    for udp_port in args.udp or []:
+        name = f"UDP {udp_port}"
         try:
-            await loop.create_datagram_endpoint(lambda: UdpIn(push), local_addr=("0.0.0.0", args.udp))
+            await loop.create_datagram_endpoint(lambda p=pusher(name): UdpIn(p), local_addr=("0.0.0.0", udp_port))
         except OSError as e:
             raise SystemExit(
-                f"\nUDP port {args.udp} is already in use ({e.strerror}).\n"
+                f"\nUDP port {udp_port} is already in use ({e.strerror}).\n"
                 "Another program is listening on it: often an earlier bridge still running in another window,\n"
-                "or another NMEA program. To see which, run in PowerShell:\n"
-                f"  Get-NetUDPEndpoint -LocalPort {args.udp} | Select OwningProcess,"
+                "or TimeZero itself (its UDP connection binds the port it sends to). To see which, run in PowerShell:\n"
+                f"  Get-NetUDPEndpoint -LocalPort {udp_port} | Select OwningProcess,"
                 "@{n='Program';e={(Get-Process -Id $_.OwningProcess).ProcessName}}\n"
-                f"Close it, or use another port (e.g. --udp {args.udp + 1}) and set TimeZero's UDP output to that port.")
-        log.info("Listening for NMEA on UDP %d", args.udp)
-    if args.tcp:
-        host, port = args.tcp.rsplit(":", 1)
-        asyncio.create_task(tcp_reader(host, int(port), push))
+                "Close it, or use a TCP output or a virtual COM port instead (see the bridge README).")
+        log.info("Listening for NMEA on UDP %d", udp_port)
+    for spec in args.tcp or []:
+        host, port = spec.rsplit(":", 1)
+        asyncio.create_task(tcp_reader(host, int(port), pusher(f"TCP {spec}")))
     if args.replay:
-        asyncio.create_task(replay_reader(args.replay, args.rate, push))
+        asyncio.create_task(replay_reader(args.replay, args.rate, pusher(f"replay {Path(args.replay).name}")))
 
     app = build_app(state, args.interval)
     runner = web.AppRunner(app)
@@ -1099,10 +1162,15 @@ async def main_async(args):
 def main():
     p = argparse.ArgumentParser(description="TimeZero NMEA to glasses bridge")
     src = p.add_argument_group("input (use one or more)")
-    src.add_argument("--serial", help="COM port TimeZero outputs to, e.g. COM10")
-    src.add_argument("--baud", type=int, default=4800, help="4800 for NMEA, 38400 if AIS is included")
-    src.add_argument("--udp", type=int, help="listen for NMEA on this UDP port, e.g. 10110")
-    src.add_argument("--tcp", help="connect to an NMEA TCP server, host:port")
+    src.add_argument("--serial", action="append", metavar="COM[:BAUD]",
+                     help="COM port to read; repeat for several. Add the speed per port, e.g. COM11:4800 "
+                          "--serial COM12:38400, or COM12:auto to detect it")
+    src.add_argument("--baud", default="4800",
+                     help="speed for --serial ports that don't give one: 4800 (GPS, instruments), "
+                          "38400 (AIS, high-speed), or auto")
+    src.add_argument("--udp", type=int, action="append", help="listen for NMEA on this UDP port; repeatable")
+    src.add_argument("--tcp", action="append", metavar="HOST:PORT",
+                     help="connect to an NMEA TCP server (TimeZero TCP output, Actisense W2K-1...); repeatable")
     src.add_argument("--replay", help="replay a recorded .nmea/.txt log (for testing)")
     src.add_argument("--rate", type=float, default=10, help="replay lines per second")
     p.add_argument("--gpx", action="append",

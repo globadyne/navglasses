@@ -85,6 +85,7 @@
 
   <div class="card">
     <h2>Data feed</h2>
+    <div id="inputs" class="muted" style="white-space: pre-line; margin-bottom: 6px"></div>
     <div id="stats" class="muted">Waiting for data</div>
     <p class="muted">Glasses app endpoint: <code id="wsurl"></code></p>
   </div>
@@ -152,6 +153,11 @@ function render(s) {
   $("stats").textContent = `${st.lines || 0} lines · ${st.bad_checksum || 0} bad checksums · ${st.ais_decoded || 0} AIS decoded` +
     (s.rx_age_s !== null && s.rx_age_s !== undefined ? ` · last data ${s.rx_age_s.toFixed(1)} s ago` : "") +
     (sent ? ` · ${sent}` : "");
+  const inputs = Object.entries(st.inputs || {}).map(([name, i]) => {
+    const age = i.age_s === null || i.age_s === undefined ? "nothing yet" : `last ${i.age_s.toFixed(1)} s ago`;
+    return `${name}: ${i.lines} lines, ${age}${i.note ? " (" + i.note + ")" : ""}`;
+  });
+  $("inputs").textContent = inputs.length ? inputs.join("\n") : "";
   const live = s.rx_age_s !== null && s.rx_age_s !== undefined && s.rx_age_s < 5;
   $("conn").className = "pill " + (live ? "ok" : "bad");
   $("conn").textContent = live ? "Receiving data" : "Connected, no data";
