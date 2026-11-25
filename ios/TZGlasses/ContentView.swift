@@ -100,7 +100,7 @@ struct ContentView: View {
   private var headText: String {
     if head.source == .manual { return "Slider" }
     guard head.headTurnDeg != nil else { return head.status }
-    let turn = Int((head.turnFromBow(boatHeading: model.bridge.snapshot?.referenceHeading) ?? 0).rounded())
+    let turn = Int((head.turnFromBow(boatHeading: model.snapshot?.referenceHeading) ?? 0).rounded())
     let where_ = turn == 0 ? "at the bow" : "\(abs(turn))° to \(turn < 0 ? "port" : "starboard")"
     return "\(head.source.label): looking \(where_)"
   }

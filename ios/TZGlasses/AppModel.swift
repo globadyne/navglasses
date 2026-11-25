@@ -23,6 +23,21 @@ final class AppModel {
   var lensMode: LensMode { didSet { save() } }
   var maxUpdatesPerSecond: Double { didSet { save() } }
   var hud: HUDSettings { didSet { save() } }
+  /// For a boat with no compass that isn't moving (no heading, no course): the way the bow
+  /// points, typed in. Only used while the boat sends neither.
+  var useFixedHeading: Bool { didSet { save() } }
+  var fixedHeadingDeg: Double { didSet { save() } }
+
+  /// The boat data, with the fixed heading filled in when the boat sends no heading or course.
+  var snapshot: BoatSnapshot? {
+    guard var s = bridge.snapshot else { return nil }
+    if fixedHeadingActive { s.own?.hdg = fixedHeadingDeg }
+    return s
+  }
+  /// True while the fixed heading stands in for a missing one.
+  var fixedHeadingActive: Bool {
+    useFixedHeading && bridge.snapshot?.own != nil && bridge.snapshot?.referenceHeading == nil
+  }
 
   private(set) var frame: HUDFrame = .waiting
   private(set) var preview: UIImage?
@@ -50,6 +65,8 @@ final class AppModel {
     useDemoData = d.object(forKey: "useDemoData") as? Bool ?? true
     lensMode = LensMode(rawValue: d.string(forKey: "lensMode") ?? "") ?? .picture
     maxUpdatesPerSecond = d.object(forKey: "maxUpdatesPerSecond") as? Double ?? 4
+    useFixedHeading = d.bool(forKey: "useFixedHeading")
+    fixedHeadingDeg = d.object(forKey: "fixedHeadingDeg") as? Double ?? 0
     var s = HUDSettings()
     if let v = d.object(forKey: "fovDeg") as? Double { s.fovDeg = v }
     if let v = d.object(forKey: "cpaCautionNm") as? Double { s.cpaCautionNm = v }
@@ -71,7 +88,7 @@ final class AppModel {
     head.reverseDirection = d.bool(forKey: "reverseDirection")
     if let src = HeadSource(rawValue: d.string(forKey: "headSource") ?? "") { head.source = src }
 
-    head.currentBoatHeading = { [weak self] in self?.bridge.snapshot?.referenceHeading }
+    head.currentBoatHeading = { [weak self] in self?.snapshot?.referenceHeading }
     glasses.onHeadSample = { [weak self] sample in self?.head.ingestGlasses(sample) }
     glasses.onGesture = { [weak self] g in self?.handle(g) }
   }
@@ -99,6 +116,8 @@ final class AppModel {
     defaults.set(useDemoData, forKey: "useDemoData")
     defaults.set(lensMode.rawValue, forKey: "lensMode")
     defaults.set(maxUpdatesPerSecond, forKey: "maxUpdatesPerSecond")
+    defaults.set(useFixedHeading, forKey: "useFixedHeading")
+    defaults.set(fixedHeadingDeg, forKey: "fixedHeadingDeg")
     defaults.set(hud.fovDeg, forKey: "fovDeg")
     defaults.set(hud.cpaCautionNm, forKey: "cpaCautionNm")
     defaults.set(hud.cpaDangerNm, forKey: "cpaDangerNm")
@@ -151,7 +170,7 @@ final class AppModel {
 
   /// Silences the current alarm for 2 minutes (it comes back if the situation persists).
   func acknowledgeAlarm() {
-    guard let snap = bridge.snapshot else { return }
+    guard let snap = snapshot else { return }
     let now = Date()
     for t in snap.targets ?? [] where HUDBuilder.severity(of: t, hud) != .normal {
       ackExpiry[t.key] = now.addingTimeInterval(120)
@@ -197,13 +216,14 @@ final class AppModel {
 
   private func tick() async {
     refreshAcknowledged()
-    let snap = bridge.snapshot
+    let snap = snapshot
     let gaze = head.gaze(boatHeading: snap?.referenceHeading)
     let userData = useDemoData ? demo.userData : bridge.userData
     recordOwnTrack(snap, userData)
-    let f = HUDBuilder.build(snapshot: snap, gaze: gaze, settings: hud, acknowledged: acknowledged,
+    var f = HUDBuilder.build(snapshot: snap, gaze: gaze, settings: hud, acknowledged: acknowledged,
                              time: ProcessInfo.processInfo.systemUptime,
                              tracks: TrackInput(own: ownTrack, saved: userData?.tracks ?? []))
+    if fixedHeadingActive, f.message == nil { f.headingText += " SET" }   // not from a compass
     frame = f
 
     let now = Date()

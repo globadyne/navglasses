@@ -64,6 +64,21 @@ struct SettingsView: View {
         }
 
         Section {
+          Toggle("Fixed heading when there's no compass", isOn: $model.useFixedHeading)
+          if model.useFixedHeading {
+            VStack(alignment: .leading) {
+              Text("Bow points \(Int(model.fixedHeadingDeg.rounded()) % 360)° true")
+              Slider(value: $model.fixedHeadingDeg, in: 0...359, step: 1)
+            }
+            Stepper("Fine tune", value: $model.fixedHeadingDeg, in: 0...359, step: 1)
+          }
+        } header: {
+          Text("Boat heading")
+        } footer: {
+          Text("For a boat with no heading sensor, tied up or stopped, so neither heading nor course comes from TimeZero. Set which way the bow points (read it off the chart). It's only used while the boat sends neither, and the lens shows SET next to the heading. Once the boat moves, its course takes over.")
+        }
+
+        Section {
           Stepper("Eye height \(model.hud.eyeHeightM, specifier: "%.1f") m",
                   value: $model.hud.eyeHeightM, in: 1...10, step: 0.5)
           VStack(alignment: .leading) {

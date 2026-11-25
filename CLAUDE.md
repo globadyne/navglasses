@@ -37,6 +37,8 @@ Regenerate the Xcode project after adding or removing Swift files: `python3 ios/
 
 `BridgeClient` (WebSocket JSON, see `BoatData.swift`) or `DemoFeed` → `AppModel.tick()` at 20 Hz → `HeadTracker.gaze()` → `HUDBuilder.build()` → `HUDImageRenderer` (phone preview and picture mode) → `GlassesController.send()`. Sends happen only when the frame changes or every 2 s, never overlapping, and capped by the "max updates per second" setting.
 
+**Fixed heading (2026-11-25):** for a boat with no heading sensor and no course (tied up), Settings → Boat heading lets the user type in where the bow points. `AppModel.snapshot` fills `own.hdg` with it only while the bridge sends neither heading nor course, and the lens shows `HDG 345° SET`. Use `model.snapshot`, not `bridge.snapshot`, anywhere a heading is needed. Tested on the user's AIS demo PC (Icom MA-510TR via a hub4com split): 36 real AIS targets placed on the lens.
+
 Gaze = boat heading at calibration + head turn since calibration + fine-tune. Using the heading at calibration (not live) is intentional: the glasses measure against the world, so labels stay put when the boat turns under a still head.
 
 ## Bridge facts
