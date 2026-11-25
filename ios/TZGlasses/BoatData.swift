@@ -94,6 +94,13 @@ struct Mark: Decodable, Sendable {
   var lon: Double?
   var rangeNm: Double?
   var bearing: Double?
+  /// TimeZero's id for the mark (UserObjects.tzdb Guid), when it came from the database.
+  var id: String?
+  /// TimeZero's colour number (not mapped to a colour yet; 11 = orange).
+  var color: LooseString?
+
+  /// Identifies the mark for acknowledging its alarm.
+  var key: String { "mark:" + (id ?? name ?? "\(lat ?? 0),\(lon ?? 0)") }
 }
 
 /// A JSON value that may arrive as a string or a number; kept as text.

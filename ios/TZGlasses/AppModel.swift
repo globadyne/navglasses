@@ -56,6 +56,9 @@ final class AppModel {
     if let v = d.object(forKey: "cpaDangerNm") as? Double { s.cpaDangerNm = v }
     if let v = d.object(forKey: "markRangeNm") as? Double { s.markRangeNm = v }
     if let v = d.object(forKey: "showMarks") as? Bool { s.showMarks = v }
+    if let v = d.object(forKey: "dangerMarkAlarm") as? Bool { s.dangerMarkAlarm = v }
+    if let v = d.object(forKey: "dangerMarkNm") as? Double { s.dangerMarkNm = v }
+    if let v = d.object(forKey: "dangerPassNm") as? Double { s.dangerPassNm = v }
     if let v = d.object(forKey: "eyeHeightM") as? Double { s.eyeHeightM = v }
     if let v = d.object(forKey: "horizonDeg") as? Double { s.horizonDeg = v }
     if let v = d.object(forKey: "showRoute") as? Bool { s.showRoute = v }
@@ -101,6 +104,9 @@ final class AppModel {
     defaults.set(hud.cpaDangerNm, forKey: "cpaDangerNm")
     defaults.set(hud.markRangeNm, forKey: "markRangeNm")
     defaults.set(hud.showMarks, forKey: "showMarks")
+    defaults.set(hud.dangerMarkAlarm, forKey: "dangerMarkAlarm")
+    defaults.set(hud.dangerMarkNm, forKey: "dangerMarkNm")
+    defaults.set(hud.dangerPassNm, forKey: "dangerPassNm")
     defaults.set(hud.eyeHeightM, forKey: "eyeHeightM")
     defaults.set(hud.horizonDeg, forKey: "horizonDeg")
     defaults.set(hud.showRoute, forKey: "showRoute")
@@ -149,6 +155,9 @@ final class AppModel {
     let now = Date()
     for t in snap.targets ?? [] where HUDBuilder.severity(of: t, hud) != .normal {
       ackExpiry[t.key] = now.addingTimeInterval(120)
+    }
+    for m in HUDBuilder.markThreats(snap, hud) {
+      ackExpiry[m.mark.key] = now.addingTimeInterval(120)
     }
     refreshAcknowledged()
   }

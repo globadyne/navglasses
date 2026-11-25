@@ -120,6 +120,20 @@ struct SettingsView: View {
           Stepper("Within \(model.hud.markRangeNm, specifier: "%.0f") nm",
                   value: $model.hud.markRangeNm, in: 1...20, step: 1)
         }
+
+        Section {
+          Toggle("Danger mark alarm", isOn: $model.hud.dangerMarkAlarm)
+          Stepper("Warn within \(model.hud.dangerMarkNm, specifier: "%.2f") nm",
+                  value: $model.hud.dangerMarkNm, in: 0.1...2, step: 0.05)
+            .disabled(!model.hud.dangerMarkAlarm)
+          Stepper("Passing closer than \(model.hud.dangerPassNm, specifier: "%.2f") nm",
+                  value: $model.hud.dangerPassNm, in: 0.02...0.5, step: 0.02)
+            .disabled(!model.hud.dangerMarkAlarm)
+        } header: {
+          Text("Danger marks")
+        } footer: {
+          Text("Sounds the alarm when the boat is heading for a danger mark: TimeZero's skull symbol, or a mark named like \"shoal\", \"rock\", \"wreck\" or \"danger\". It goes off when the mark is within the first distance and your course over ground passes closer than the second. The mark turns red; tap the glasses to silence it for 2 minutes.")
+        }
       }
       .navigationTitle("Settings")
       .toolbar { Button("Done") { dismiss() } }

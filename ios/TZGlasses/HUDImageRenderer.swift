@@ -73,10 +73,10 @@ enum HUDImageRenderer {
   }
 
   /// Mark icons, same shapes as `markIcon` in hud-demo.html. `p` is where the mark sits on the water.
-  private static func drawMarkIcon(_ icon: MarkIcon, at p: CGPoint, in c: CGContext) {
+  private static func drawMarkIcon(_ icon: MarkIcon, at p: CGPoint, color: UIColor, in c: CGContext) {
     let x = p.x, y = p.y
-    c.setStrokeColor(markColor.cgColor)
-    c.setFillColor(markColor.cgColor)
+    c.setStrokeColor(color.cgColor)
+    c.setFillColor(color.cgColor)
     c.setLineWidth(2.5)
     switch icon {
     case .fish:
@@ -285,15 +285,16 @@ enum HUDImageRenderer {
     for m in f.marks {
       let x = CGFloat(m.x) * W
       let y = min(max(CGFloat(m.y) * H, 100), H - 30)
-      drawMarkIcon(m.icon, at: CGPoint(x: x, y: y), in: c)
+      let col = m.alarm ? red : markColor
+      drawMarkIcon(m.icon, at: CGPoint(x: x, y: y), color: col, in: c)
       let label = "\(m.title) \(m.detail)"
       let w = textWidth(label, labelFont(21)) + 12
       let box = settle(CGRect(x: min(max(x - w / 2, 4), W - 4 - w), y: y - 48, width: w, height: 26),
                        step: 30, below: y + 16)
       placed.append(box)
-      if box.minY > y { leader(x, from: y + 12, to: box.minY, markColor, width: 1.2) }
-      else { leader(x, from: box.maxY, to: y - 22, markColor, width: 1.2) }
-      text(label, at: CGPoint(x: x, y: box.minY), font: labelFont(21), color: markColor, align: .center)
+      if box.minY > y { leader(x, from: y + 12, to: box.minY, col, width: 1.2) }
+      else { leader(x, from: box.maxY, to: y - 22, col, width: 1.2) }
+      text(label, at: CGPoint(x: x, y: box.minY), font: labelFont(21), color: col, align: .center)
     }
 
     // Edge cues for things out of view: under the top strip, clear of the labels below.

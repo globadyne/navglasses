@@ -63,10 +63,16 @@ struct HUDItem: Equatable, Sendable {
 enum MarkIcon: Sendable {
   case fish, pots, danger, anchor, generic
 
-  /// Picks a symbol from the mark's GPX symbol, TimeZero icon and name. TimeZero's numeric
-  /// icon values aren't mapped yet (no real data seen), so a number alone gives `.generic`
-  /// and the name's keywords decide.
+  /// TimeZero's numeric `Icon` values (UserObjects.tzdb) seen so far. Add the rest from the
+  /// user's test marks (one mark per symbol, named after it).
+  static let timeZeroIcons: [String: MarkIcon] = [
+    "17": .danger,   // skull (seen 2026-11-25)
+  ]
+
+  /// Picks a symbol from the mark's GPX symbol, then TimeZero's own icon, then the name's
+  /// keywords. TimeZero's icon wins over the name: a skull named "Lobster pots" is a danger.
   static func classify(symbol: String?, icon: String?, name: String?) -> MarkIcon {
+    if let icon, let known = timeZeroIcons[icon] { return known }
     for text in [symbol, icon, name] {
       guard let t = text?.lowercased(), !t.isEmpty else { continue }
       if ["fish"].contains(where: t.contains) { return .fish }
@@ -87,6 +93,18 @@ struct HUDMark: Equatable, Sendable {
   var x: Double
   var y: Double
   var rangeNm: Double
+  /// A danger mark the boat is heading for: drawn red.
+  var alarm = false
+}
+
+/// A danger mark the boat is heading for (see `HUDBuilder.markThreats`).
+struct MarkThreat: Sendable {
+  var mark: Mark
+  var rangeNm: Double
+  /// How close the present course passes it.
+  var passNm: Double
+  /// Minutes until abeam at the present speed; nil when already within passing distance.
+  var minutes: Double?
 }
 
 /// A point on the lens in pixels (0...600 across and down; may fall a little outside).
@@ -223,6 +241,12 @@ struct HUDSettings: Equatable, Sendable {
   var markRangeNm: Double = 5
   var showMarks: Bool = true
   var maxMarks: Int = 5
+  /// Alarm when the boat is heading for a danger mark (skull, or a name like "shoal" or "rock").
+  var dangerMarkAlarm: Bool = true
+  /// Warn when such a mark is this close ahead…
+  var dangerMarkNm: Double = 0.5
+  /// …and the present course passes closer than this.
+  var dangerPassNm: Double = 0.1
   /// Height of the wearer's eyes above the water. Sets how far below the horizon things sit.
   var eyeHeightM: Double = 3
   /// Moves the horizon down (positive) or up (negative) in the lens, to line it up with the real one.
@@ -255,6 +279,31 @@ enum HUDBuilder {
     return .normal
   }
 
+  /// Danger marks the boat is heading for, nearest first: within `dangerMarkNm`, ahead, and
+  /// the course over ground passes closer than `dangerPassNm` (or the boat is already that close).
+  /// Uses course, not heading, so set and leeway count.
+  static func markThreats(_ snap: BoatSnapshot, _ s: HUDSettings) -> [MarkThreat] {
+    guard s.dangerMarkAlarm, let own = snap.own else { return [] }
+    let course = own.cog ?? snap.referenceHeading
+    let sog = own.sog ?? 0
+    var out: [MarkThreat] = []
+    for m in snap.marks ?? [] {
+      guard let r = m.rangeNm, let b = m.bearing, r <= s.dangerMarkNm,
+            MarkIcon.classify(symbol: m.symbol, icon: m.icon?.value, name: m.name) == .danger else { continue }
+      if r <= s.dangerPassNm {
+        out.append(MarkThreat(mark: m, rangeNm: r, passNm: r, minutes: nil))
+        continue
+      }
+      guard let c = course, sog >= 0.5 else { continue }       // drifting: only when already close
+      let rel = Geo.wrap180(b - c) * .pi / 180
+      guard abs(rel) < .pi / 2 else { continue }                // behind
+      let pass = abs(r * sin(rel))
+      guard pass < s.dangerPassNm else { continue }
+      out.append(MarkThreat(mark: m, rangeNm: r, passNm: pass, minutes: r * cos(rel) / sog * 60))
+    }
+    return out.sorted { $0.rangeNm < $1.rangeNm }
+  }
+
   /// - Parameters:
   ///   - gaze: true bearing the wearer is looking at, or nil if head direction is unknown
   ///   - acknowledged: target keys whose alarm the wearer has dismissed
@@ -281,7 +330,20 @@ enum HUDBuilder {
       .map { ($0, severity(of: $0, s)) }
       .filter { $0.1 != .normal }
       .sorted { ($0.0.cpaNm ?? 99) < ($1.0.cpaNm ?? 99) }
-    if let threat = threats.first(where: { !acknowledged.contains($0.0.key) }),
+    // A danger mark ahead outranks a caution vessel; a danger vessel outranks the mark.
+    let markAlarms = markThreats(snap, s)
+    let vesselAlarm = threats.first(where: { !acknowledged.contains($0.0.key) })
+    let markAlarm = markAlarms.first(where: { !acknowledged.contains($0.mark.key) })
+    if let m = markAlarm, vesselAlarm.map({ $0.1 != .danger }) ?? true {
+      f.alarmTitle = m.minutes.map { String(format: "DANGER MARK %.2f NM · %d MIN", m.rangeNm, max(1, Int($0.rounded()))) }
+        ?? String(format: "DANGER MARK %.2f NM", m.rangeNm)
+      var side = ""
+      if let b = m.mark.bearing, let h = snap.referenceHeading {
+        let rel = Int(Geo.wrap180(b - h).rounded())
+        side = abs(rel) <= 2 ? " · DEAD AHEAD" : " · \(abs(rel))° \(rel < 0 ? "PORT" : "STBD")"
+      }
+      f.alarmDetail = "\(shortName(m.mark.name ?? "MARK"))\(side)"
+    } else if let threat = vesselAlarm,
        let cpa = threat.0.cpaNm, let tcpa = threat.0.tcpaMin {
       let t = threat.0
       f.alarmTitle = String(format: "CPA %.2f NM IN %d MIN", cpa, Int(tcpa.rounded()))
@@ -359,13 +421,16 @@ enum HUDBuilder {
     // TimeZero marks: their own layer, nearest first.
     if s.showMarks {
       var marks: [HUDMark] = []
+      let alarmKeys = Set(markAlarms.map { $0.mark.key })
       for m in snap.marks ?? [] {
-        guard let r = m.rangeNm, r <= s.markRangeNm, let x = place(m.bearing) else { continue }
-        marks.append(HUDMark(title: m.name.map { shortName($0) } ?? "MARK", detail: String(format: "%.1f", r),
+        let alarm = alarmKeys.contains(m.key)
+        guard let r = m.rangeNm, r <= s.markRangeNm || alarm, let x = place(m.bearing) else { continue }
+        marks.append(HUDMark(title: m.name.map { shortName($0) } ?? "MARK",
+                             detail: String(format: r < 1 ? "%.2f" : "%.1f", r),
                              icon: MarkIcon.classify(symbol: m.symbol, icon: m.icon?.value, name: m.name),
-                             x: x, y: height(r), rangeNm: r))
+                             x: x, y: height(r), rangeNm: r, alarm: alarm))
       }
-      marks.sort { $0.rangeNm < $1.rangeNm }
+      marks.sort { $0.alarm != $1.alarm ? $0.alarm : $0.rangeNm < $1.rangeNm }
       f.marks = Array(marks.prefix(s.maxMarks))
     }
 
@@ -388,6 +453,13 @@ enum HUDBuilder {
       guard let b = t.bearing else { continue }
       let rel = Geo.wrap180(b - gaze)
       if abs(rel) > half { f.edges.append(EdgeCue(label: shortName(t.name), turnDeg: Int(rel.rounded()), severity: sev)) }
+    }
+    for m in markAlarms {
+      guard let b = m.mark.bearing else { continue }
+      let rel = Geo.wrap180(b - gaze)
+      if abs(rel) > half {
+        f.edges.append(EdgeCue(label: shortName(m.mark.name ?? "DANGER"), turnDeg: Int(rel.rounded()), severity: .danger))
+      }
     }
     if let route = snap.route, let b = route.bearing, let wp = route.toWp {
       let rel = Geo.wrap180(b - gaze)
