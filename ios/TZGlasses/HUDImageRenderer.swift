@@ -284,7 +284,7 @@ enum HUDImageRenderer {
     // TimeZero marks: icon on the water, one-line label above, stepped clear of other labels.
     for m in f.marks {
       let x = CGFloat(m.x) * W
-      let y = min(max(CGFloat(m.y) * H, 100), H - 30)
+      let y = min(max(CGFloat(m.y) * H, 100), f.alarmTitle != nil ? H - 122 : H - 30)   // keep clear of the alarm banner
       let col = m.alarm ? red : markColor
       drawMarkIcon(m.icon, at: CGPoint(x: x, y: y), color: col, in: c)
       let label = "\(m.title) \(m.detail)"
