@@ -228,6 +228,8 @@ struct HUDFrame: Equatable, Sendable {
   var footer: String?
   var stale: Bool = false
   var message: String?
+  /// Day, or one of the night looks (picture lens only).
+  var look: LensLook = .day
 
   static let waiting = HUDFrame(message: "Waiting for boat data")
 }
@@ -266,6 +268,47 @@ struct HUDSettings: Equatable, Sendable {
   /// Label colour per target source, as "#rrggbb". Alarms override it with amber or red.
   var sourceColors: [String: String] = HUDSettings.defaultSourceColors
   static let defaultSourceColors = ["AIS": "#8ff0c7", "ARPA": "#ffb35c", "ONLINE": "#7fc4ff"]
+  /// How the lens is drawn: Day, Night or Night red.
+  var lensLook: LensLook = .day
+  /// With a night look chosen: use Day while the sun is up, the night look after sunset.
+  var lookAtSunset: Bool = true
+}
+
+/// Night looks dim everything except marks (which glow) and alarms, so gear stands out
+/// and the lens doesn't dazzle. Night red also turns everything red, to keep night vision.
+enum LensLook: String, CaseIterable, Identifiable, Sendable {
+  case day, night, nightRed
+  var id: String { rawValue }
+  var label: String {
+    switch self {
+    case .day: "Day"
+    case .night: "Night"
+    case .nightRed: "Night red"
+    }
+  }
+}
+
+enum Sun {
+  /// The sun's height above the horizon in degrees (about 0.1° accurate, plenty for sunset).
+  static func altitude(lat: Double, lon: Double, at date: Date) -> Double {
+    let rad = Double.pi / 180
+    let d = date.timeIntervalSince1970 / 86400 + 2440587.5 - 2451545.0   // days since J2000
+    let g = (357.529 + 0.98560028 * d) * rad
+    let q = 280.459 + 0.98564736 * d
+    let l = (q + 1.915 * sin(g) + 0.020 * sin(2 * g)) * rad
+    let e = (23.439 - 0.00000036 * d) * rad
+    let ra = atan2(cos(e) * sin(l), cos(l)) / rad
+    let dec = asin(sin(e) * sin(l))
+    let gmst = 280.46061837 + 360.98564736629 * d
+    let ha = (gmst + lon - ra) * rad
+    let phi = lat * rad
+    return asin(sin(phi) * sin(dec) + cos(phi) * cos(dec) * cos(ha)) / rad
+  }
+
+  /// True after sunset and before sunrise.
+  static func isDown(lat: Double, lon: Double, at date: Date) -> Bool {
+    altitude(lat: lat, lon: lon, at: date) < -0.833
+  }
 }
 
 enum HUDBuilder {

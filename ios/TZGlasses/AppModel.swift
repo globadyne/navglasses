@@ -83,6 +83,8 @@ final class AppModel {
     if let v = d.object(forKey: "showTracks") as? Bool { s.showTracks = v }
     if let v = d.object(forKey: "trackRangeNm") as? Double { s.trackRangeNm = v }
     if let v = d.stringArray(forKey: "hiddenSources") { s.hiddenSources = Set(v) }
+    if let v = LensLook(rawValue: d.string(forKey: "lensLook") ?? "") { s.lensLook = v }
+    if let v = d.object(forKey: "lookAtSunset") as? Bool { s.lookAtSunset = v }
     if let v = d.dictionary(forKey: "sourceColors") as? [String: String] { s.sourceColors.merge(v) { $1 } }
     hud = s
     head.reverseDirection = d.bool(forKey: "reverseDirection")
@@ -134,6 +136,8 @@ final class AppModel {
     defaults.set(hud.trackRangeNm, forKey: "trackRangeNm")
     defaults.set(Array(hud.hiddenSources), forKey: "hiddenSources")
     defaults.set(hud.sourceColors, forKey: "sourceColors")
+    defaults.set(hud.lensLook.rawValue, forKey: "lensLook")
+    defaults.set(hud.lookAtSunset, forKey: "lookAtSunset")
   }
 
   private func applyDataSource() {
@@ -187,6 +191,17 @@ final class AppModel {
     acknowledged = Set(ackExpiry.keys)
   }
 
+  /// The look to draw now: the chosen one, or Day while the sun is up if it switches at sunset.
+  /// Without a position it can't tell, so it keeps the last answer.
+  @ObservationIgnored private var lastLook = LensLook.day
+  func look(at snap: BoatSnapshot?) -> LensLook {
+    guard hud.lensLook != .day, hud.lookAtSunset else { return hud.lensLook }
+    if let lat = snap?.own?.lat, let lon = snap?.own?.lon {
+      lastLook = Sun.isDown(lat: lat, lon: lon, at: Date()) ? hud.lensLook : .day
+    }
+    return lastLook
+  }
+
   // MARK: Own track
 
   /// Starts from the bridge's recorded track (it keeps recording while the app is closed)
@@ -224,6 +239,7 @@ final class AppModel {
                              time: ProcessInfo.processInfo.systemUptime,
                              tracks: TrackInput(own: ownTrack, saved: userData?.tracks ?? []))
     if fixedHeadingActive, f.message == nil { f.headingText += " SET" }   // not from a compass
+    f.look = look(at: snap)
     frame = f
 
     let now = Date()

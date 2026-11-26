@@ -52,8 +52,18 @@ enum HUDImageRenderer {
       UIColor.black.setFill()
       c.fill(CGRect(origin: .zero, size: size))
       draw(f, sourceColors: sourceColors, in: c)
+      if f.look == .nightRed {
+        // Keep only the red of everything drawn: brightness stays, colour goes red.
+        c.setBlendMode(.multiply)
+        UIColor.red.setFill()
+        c.fill(CGRect(origin: .zero, size: size))
+        c.setBlendMode(.normal)
+      }
     }
   }
+
+  /// At night everything but marks and alarms is drawn at this brightness.
+  private static let nightDim: CGFloat = 0.45
 
   private static func text(_ s: String, at p: CGPoint, font: UIFont, color: UIColor, align: NSTextAlignment = .left) {
     let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
@@ -178,6 +188,11 @@ enum HUDImageRenderer {
 
   private static func draw(_ f: HUDFrame, sourceColors: [String: String], in c: CGContext) {
     let W = size.width, H = size.height
+    let night = f.look != .day
+    /// Colour for something that isn't a mark or an alarm: dimmer at night.
+    func quiet(_ col: UIColor) -> UIColor {
+      night ? col.withAlphaComponent(col.cgColor.alpha * nightDim) : col
+    }
 
     // Ground layer first, so labels draw over it: tracks, then the route.
     for t in f.tracks {
@@ -208,6 +223,11 @@ enum HUDImageRenderer {
 
     if let msg = f.message {
       text(msg, at: CGPoint(x: W / 2, y: H / 2 - 16), font: labelFont(30), color: hud, align: .center)
+    }
+    if night {
+      // Everything so far (tracks, route, top strip) dims; the lens is black, so this darkens it.
+      c.setFillColor(UIColor(white: 0, alpha: 1 - nightDim).cgColor)
+      c.fill(CGRect(x: 0, y: 0, width: W, height: H))
     }
 
     // Labels. The marker sits where the thing is on the water (below the horizon by
@@ -244,7 +264,7 @@ enum HUDImageRenderer {
       let y = min(max(CGFloat(item.y) * H, 110), H - 30)
       // Alarms are amber or red; otherwise each target source has its own colour.
       let col = item.severity == .normal
-        ? (item.source.flatMap { sourceColors[$0] }.flatMap { color(hex: $0) } ?? hud) : color(item.severity)
+        ? quiet(item.source.flatMap { sourceColors[$0] }.flatMap { color(hex: $0) } ?? hud) : color(item.severity)
 
       c.setStrokeColor(col.cgColor)
       c.setLineWidth(3)
@@ -286,6 +306,17 @@ enum HUDImageRenderer {
       let x = CGFloat(m.x) * W
       let y = min(max(CGFloat(m.y) * H, 100), f.alarmTitle != nil ? H - 122 : H - 30)   // keep clear of the alarm banner
       let col = m.alarm ? red : markColor
+      if night {
+        // Glow: a soft halo on the water, and a blur round the icon, label and line.
+        c.saveGState()
+        let halo = CGGradient(colorsSpace: nil, colors: [col.withAlphaComponent(0.5).cgColor,
+                                                         col.withAlphaComponent(0).cgColor] as CFArray,
+                              locations: [0, 1])!
+        let p = CGPoint(x: x, y: y - 4)
+        c.drawRadialGradient(halo, startCenter: p, startRadius: 0, endCenter: p, endRadius: 38, options: [])
+        c.setShadow(offset: .zero, blur: 12, color: col.cgColor)
+      }
+      defer { if night { c.restoreGState() } }
       drawMarkIcon(m.icon, at: CGPoint(x: x, y: y), color: col, in: c)
       let label = "\(m.title) \(m.detail)"
       let w = textWidth(label, labelFont(21)) + 12
@@ -300,7 +331,7 @@ enum HUDImageRenderer {
     // Edge cues for things out of view: under the top strip, clear of the labels below.
     var leftY: CGFloat = 96, rightY: CGFloat = 96
     for e in f.edges {
-      let col = color(e.severity)
+      let col = e.severity == .normal ? quiet(color(e.severity)) : color(e.severity)
       if e.turnDeg < 0 {
         text("‹ \(e.label) \(abs(e.turnDeg))°", at: CGPoint(x: 16, y: leftY), font: font(20), color: col)
         leftY += 30
@@ -320,7 +351,7 @@ enum HUDImageRenderer {
       text((f.alarmDetail ?? "") + " · TAP TO ACK", at: CGPoint(x: W / 2, y: box.minY + 48),
            font: font(19, .regular), color: red, align: .center)
     } else if let footer = f.footer {
-      text(footer, at: CGPoint(x: 24, y: H - 52), font: font(22, .regular), color: hudDim)
+      text(footer, at: CGPoint(x: 24, y: H - 52), font: font(22, .regular), color: quiet(hudDim))
     }
   }
 }

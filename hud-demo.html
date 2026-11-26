@@ -138,6 +138,15 @@
           <label><input type="radio" name="tod" id="tod-night" value="night"><span>Night</span></label>
         </div>
       </div>
+      <div class="row">
+        <div class="seg" role="radiogroup" aria-label="Lens look">
+          <label><input type="radio" name="look" value="day"><span>Day lens</span></label>
+          <label><input type="radio" name="look" value="night" checked><span>Night lens</span></label>
+          <label><input type="radio" name="look" value="nightRed"><span>Night red</span></label>
+        </div>
+        <label class="check"><input type="checkbox" id="look-sunset" checked> Switch at sunset</label>
+      </div>
+      <p class="hint">Night lens dims everything except marks, which glow, and alarms, which stay bright, so gear stands out without dazzling. Night red does the same in red, for night vision. With Switch at sunset on, the lens stays on Day in daylight and changes once the sun is down (Dusk or Night above). Picture mode only.</p>
       <p class="hint" id="mode-hint">Picture mode: the app draws the lens as an image. Full colour and exact placement.</p>
     </div>
 
@@ -552,8 +561,15 @@
     } else { c.arc(x, y, 8, 0, Math.PI * 2); c.stroke(); }
   }
 
+  // Night looks (HUDImageRenderer): everything but marks and alarms at NIGHT_DIM, marks glow.
+  let lensLook = "night", lookAtSunset = true;
+  const NIGHT_DIM = 0.45;
+  const currentLook = () => (lookAtSunset && tod === "day") ? "day" : lensLook;
+  const rgba = (col, a) => col.replace("rgb(", "rgba(").replace(")", `,${a})`);
+
   function renderPicture(c, f, gaze, time, worldPpd) {   // mirrors HUDImageRenderer.draw, plus route, tracks and marks
     const W = 600, H = 600;
+    const look = currentLook(), night = look !== "day";
     c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
 
     // Ground layer: tracks, then the route, then marks
@@ -566,6 +582,7 @@
     txt(c, f.heading, 24, 20, `500 28px ${MONO}`, HUD);
     txt(c, f.speed, W - 24, 20, `500 28px ${MONO}`, HUD, "right");
     txt(c, f.gazeText, W / 2, 58, `400 24px ${MONO}`, HUD_DIM, "center");
+    if (night) { c.fillStyle = `rgba(0,0,0,${1 - NIGHT_DIM})`; c.fillRect(0, 0, W, H); }   // dims tracks, route, top strip
 
     // Labels: the marker sits where the thing is on the water; the text sits above it,
     // stepping up (with a leader line) when labels would overlap.
@@ -574,6 +591,7 @@
     [...f.items].sort((a, b) => a.rng - b.rng).forEach(it => {
       const x = it.x * W, col = it.sev ? sevCol(it.sev) : it.src ? SRC[it.src].color : HUD;
       const y = clamp(300 + depDeg(it.rng) * LPPD, 110, H - 30);
+      c.globalAlpha = night && !it.sev ? NIGHT_DIM : 1;
       const sz = objScale(it.rng) * k;          // ship size on the lens
       c.strokeStyle = col; c.lineWidth = 3; c.beginPath();
       let top = y;
@@ -597,12 +615,20 @@
       if (box.y + box.h < top - 8) { c.strokeStyle = col; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x, box.y + box.h); c.lineTo(x, top - 4); c.stroke(); }
       txt(c, it.title, x, box.y, `600 28px ${COND}`, col, "center");
       txt(c, it.detail, x, box.y + 32, `400 20px ${MONO}`, col, "center");
+      c.globalAlpha = 1;
     });
 
     // TimeZero marks: icon on the water, one-line label above, stepped clear of other labels
     (f.marks || []).forEach(m => {
       const x = m.x * W, y = clamp(300 + depDeg(m.rng) * LPPD, 100, f.alarmTitle ? H - 122 : H - 30);   // keep clear of the alarm banner
       const mc = m.alarm ? RED : MARK;      // a danger mark the boat is heading for turns red
+      c.save();
+      if (night) {   // glow: a soft halo on the water, and a blur round the icon, label and line
+        const g = c.createRadialGradient(x, y - 4, 0, x, y - 4, 38);
+        g.addColorStop(0, rgba(mc, 0.5)); g.addColorStop(1, rgba(mc, 0));
+        c.fillStyle = g; c.fillRect(x - 38, y - 42, 76, 76);
+        c.shadowColor = mc; c.shadowBlur = 12;
+      }
       markIcon(c, m.icon, x, y, mc);
       const label = `${m.title} ${m.detail.replace(" NM", "")}`;
       c.font = `600 21px ${COND}`; const w = c.measureText(label).width + 12;
@@ -611,9 +637,11 @@
       placed.push(box);
       if (box.y + box.h < y - 26) { c.strokeStyle = mc; c.lineWidth = 1.2; c.beginPath(); c.moveTo(x, box.y + box.h); c.lineTo(x, y - 22); c.stroke(); }
       txt(c, label, x, box.y, `600 21px ${COND}`, mc, "center");
+      c.restore();
     });
     let ly = 96, ry = 96;
     f.edges.forEach(e => {
+      c.globalAlpha = night && !e.sev ? NIGHT_DIM : 1;
       if (e.turn < 0) { txt(c, `‹ ${e.label} ${Math.abs(e.turn)}°`, 16, ly, `500 20px ${MONO}`, sevCol(e.sev)); ly += 30; }
       else { txt(c, `${e.label} ${e.turn}° ›`, W - 16, ry, `500 20px ${MONO}`, sevCol(e.sev), "right"); ry += 30; }
     });
@@ -621,7 +649,12 @@
       c.strokeStyle = RED; c.lineWidth = 3; c.strokeRect(20, H - 104, W - 40, 84);
       txt(c, f.alarmTitle, W / 2, H - 94, `600 30px ${COND}`, RED, "center");
       txt(c, `${f.alarmDetail} · TAP TO ACK`, W / 2, H - 56, `400 19px ${MONO}`, RED, "center");
-    } else txt(c, f.footer, 24, H - 52, `400 22px ${MONO}`, HUD_DIM);
+    } else { c.globalAlpha = night ? NIGHT_DIM : 1; txt(c, f.footer, 24, H - 52, `400 22px ${MONO}`, HUD_DIM); }
+    c.globalAlpha = 1;
+    if (look === "nightRed") {   // keep only the red of everything drawn
+      c.globalCompositeOperation = "multiply"; c.fillStyle = "#f00"; c.fillRect(0, 0, W, H);
+      c.globalCompositeOperation = "source-over";
+    }
   }
 
   // Approximation of Meta's Display components (FlexBox, Text, Icon, card) as HUDDisplayLayout.text builds them.
@@ -1186,6 +1219,8 @@
       ? "Only what the glasses draw. On the real display black is transparent, so these labels float over the water."
       : "The dashed square is the display in the right lens, about 20° wide. It's see-through: black adds nothing, so only the labels light up over the water. Everything outside the square is just the real world. In daylight the world looks a little darker because the lenses tint outdoors, which is what keeps the display readable in sun.";
   }));
+  document.querySelectorAll('input[name="look"]').forEach(r => r.addEventListener("change", e => { lensLook = e.target.value; }));
+  $("look-sunset").addEventListener("change", e => { lookAtSunset = e.target.checked; });
   document.querySelectorAll('input[name="tod"]').forEach(r => r.addEventListener("change", e => { tod = e.target.value; }));
   document.querySelectorAll('input[name="lensmode"]').forEach(r => r.addEventListener("change", e => {
     lensMode = e.target.value;

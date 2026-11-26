@@ -49,6 +49,20 @@ struct SettingsView: View {
         }
 
         Section {
+          Picker("Lens look", selection: $model.hud.lensLook) {
+            ForEach(LensLook.allCases) { Text($0.label).tag($0) }
+          }
+          .pickerStyle(.segmented)
+          if model.hud.lensLook != .day {
+            Toggle("Switch at sunset", isOn: $model.hud.lookAtSunset)
+          }
+        } header: {
+          Text("Night")
+        } footer: {
+          Text("Night dims everything except marks, which glow, and alarms, which stay bright, so gear stands out without dazzling you. Night red does the same in red, to keep your night vision. With Switch at sunset on, the lens stays on Day while the sun is up (worked out from the boat's position) and goes to your night look after dark. Picture lens mode only.")
+        }
+
+        Section {
           Toggle("Reverse left and right", isOn: Binding(
             get: { model.head.reverseDirection },
             set: { model.head.reverseDirection = $0; model.saveHeadSettings() }
