@@ -60,12 +60,13 @@ jobs:
         continue-on-error: true
         run: |
           $zip = "$env:RUNNER_TEMP\com0com.zip"
-          curl.exe -fsSL --retry 3 -A "Mozilla/5.0" -o $zip "https://downloads.sourceforge.net/project/com0com/com0com/2.2.2.0/com0com-2.2.2.0-x64-fre-signed.zip"
+          # SourceForge turns away requests that claim to be a browser (403); a plain download tool gets the file.
+          curl.exe -fsSL --retry 3 -A "Wget/1.21" -o $zip "https://downloads.sourceforge.net/project/com0com/com0com/2.2.2.0/com0com-2.2.2.0-x64-fre-signed.zip"
           if ($LASTEXITCODE -ne 0) { Write-Host "::warning::Couldn't download com0com; building the installer without virtual COM ports"; exit 0 }
           Write-Host "com0com zip SHA-256: $((Get-FileHash $zip).Hash)"
           Expand-Archive $zip "$env:RUNNER_TEMP\com0com" -Force
           Get-ChildItem -Recurse "$env:RUNNER_TEMP\com0com" | Select-Object FullName, Length | Format-Table -AutoSize
-          $setup = Get-ChildItem -Recurse "$env:RUNNER_TEMP\com0com" -Filter "Setup*.exe" | Select-Object -First 1
+          $setup = Get-ChildItem -Recurse "$env:RUNNER_TEMP\com0com" -Filter "setup.exe" | Select-Object -First 1
           if (-not $setup) { Write-Host "::warning::No setup .exe in the com0com download"; exit 0 }
           $sig = Get-AuthenticodeSignature $setup.FullName
           Write-Host "Signature: $($sig.Status) by $($sig.SignerCertificate.Subject)"
@@ -114,13 +115,10 @@ jobs:
         continue-on-error: true
         timeout-minutes: 6
         run: |
-          # Trust the publisher first, as clicking "Install" on Windows' driver prompt would.
-          $sig = Get-AuthenticodeSignature bridge\installer\com0com-setup.exe
-          if ($sig.SignerCertificate) {
-            [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\c0c.cer", $sig.SignerCertificate.Export("Cert"))
-            certutil -addstore TrustedPublisher "$env:RUNNER_TEMP\c0c.cer" | Out-Null
-          }
+          # The same two steps the installer runs: com0com's silent setup, then trusting its driver publisher.
           Start-Process bridge\installer\com0com-setup.exe -ArgumentList "/S" -Wait
+          powershell -NoProfile -ExecutionPolicy Bypass -File bridge\installer\trust-com0com.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Couldn't trust com0com's driver publisher" }
           $setupc = @("${env:ProgramFiles(x86)}\com0com\setupc.exe", "${env:ProgramFiles}\com0com\setupc.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $setupc) { throw "com0com installed no setupc.exe" }
           Write-Host "setupc: $setupc"

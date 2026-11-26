@@ -174,9 +174,48 @@ def list_serial_ports():
 # com0com makes pairs of virtual COM ports joined like a null-modem cable: what one program writes
 # to COM10 comes out of COM11. The installer can install it; the Settings page makes and removes
 # pairs through com0com's own command-line tool, setupc.exe (needs admin: the service has it).
-# Pairs are made with real COM names (TimeZero only lists COMn ports) and EmuOverrun=yes, so when
-# nobody is reading one end, data is dropped instead of making the writer wait.
-VCOM_PARAMS = "PortName=COM#,EmuOverrun=yes"
+# Pairs get real COM names (TimeZero only lists COMn ports), chosen here from the numbers Windows
+# hasn't handed out, and the settings com0com's ReadMe gives against hangs: EmuOverrun=yes (when
+# nobody reads one end, data is dropped instead of making the writer wait) and EmuBR=yes.
+VCOM_PARAMS = "EmuBR=yes,EmuOverrun=yes"
+VCOM_FIRST = 10   # start above the low numbers real adapters usually get
+
+
+def used_com_numbers():
+    """COM numbers taken on this PC: Windows' COM name register (also remembers unplugged USB
+    adapters), the ports present now, and com0com's own pairs."""
+    used = set()
+    try:
+        import winreg
+        try:
+            k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\COM Name Arbiter")
+            db, _ = winreg.QueryValueEx(k, "ComDB")
+            for i, byte in enumerate(bytes(db)):
+                used |= {i * 8 + b + 1 for b in range(8) if byte >> b & 1}
+        except OSError:
+            pass
+        try:
+            k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DEVICEMAP\SERIALCOMM")
+            for i in range(winreg.QueryInfoKey(k)[1]):
+                m = re.match(r"COM(\d+)$", str(winreg.EnumValue(k, i)[1]), re.I)
+                if m:
+                    used.add(int(m.group(1)))
+        except OSError:
+            pass
+    except ImportError:  # not Windows
+        pass
+    for p in list_serial_ports():
+        m = re.match(r"COM(\d+)$", p["device"], re.I)
+        if m:
+            used.add(int(m.group(1)))
+    return used
+
+
+def free_com_pair(used, first=VCOM_FIRST):
+    n = first
+    while n in used or n + 1 in used:
+        n += 1
+    return f"COM{n}", f"COM{n + 1}"
 
 
 def setupc_path():
@@ -220,8 +259,16 @@ def vcom_pairs():
 
 
 def vcom_add_pair():
-    before = {p["n"] for p in vcom_pairs()}
-    _setupc("--wait", "30", "install", VCOM_PARAMS, VCOM_PARAMS)
+    pairs = vcom_pairs()
+    before = {p["n"] for p in pairs}
+    used = used_com_numbers()
+    for p in pairs:
+        for name in (p["a"], p["b"]):
+            m = re.match(r"COM(\d+)$", name, re.I)
+            if m:
+                used.add(int(m.group(1)))
+    a, b = free_com_pair(used)
+    _setupc("--wait", "60", "install", f"PortName={a},{VCOM_PARAMS}", f"PortName={b},{VCOM_PARAMS}")
     new = [p for p in vcom_pairs() if p["n"] not in before]
     if not new:
         raise RuntimeError("com0com didn't report a new pair. Look in Device Manager under "

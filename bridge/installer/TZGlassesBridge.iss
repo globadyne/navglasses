@@ -48,7 +48,7 @@ FinishedLabel=Next, open the bridge settings and add where the boat's data comes
 
 #ifdef HaveCom0com
 [Tasks]
-Name: "vcom"; Description: "Virtual COM ports (com0com), to link the bridge and TimeZero on this PC. Windows will ask you to allow its driver: choose Install."; Check: not Com0comInstalled
+Name: "vcom"; Description: "Virtual COM ports (com0com), to link the bridge and TimeZero on this PC"; Check: not Com0comInstalled
 #endif
 
 [Files]
@@ -60,6 +60,7 @@ Source: "tz-bridge.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "com0com-setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Tasks: vcom
 Source: "com0com-NOTICE.txt"; DestDir: "{app}"; Flags: ignoreversion; Tasks: vcom
 #endif
+Source: "trust-com0com.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
 Name: "{commonappdata}\TZ Glasses Bridge"
@@ -82,8 +83,11 @@ Name: "{group}\Uninstall TZ Glasses Bridge"; Filename: "{uninstallexe}"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TZ Glasses Bridge"""; Flags: runhidden; StatusMsg: "Setting up the firewall..."
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""TZ Glasses Bridge"" dir=in action=allow program=""{app}\tz-bridge\tz-bridge.exe"" enable=yes profile=any"; Flags: runhidden
 #ifdef HaveCom0com
-Filename: "{tmp}\com0com-setup.exe"; Parameters: "/S"; Tasks: vcom; Flags: waituntilterminated; StatusMsg: "Installing virtual COM ports (com0com). If Windows asks to allow the driver, choose Install..."
+Filename: "{tmp}\com0com-setup.exe"; Parameters: "/S"; Tasks: vcom; Flags: waituntilterminated; StatusMsg: "Installing virtual COM ports (com0com)..."
 #endif
+; Whenever com0com is here (just installed, or installed by hand before), trust its driver publisher so
+; the bridge service can make pairs without a prompt it couldn't show.
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\trust-com0com.ps1"""; Flags: runhidden waituntilterminated; Check: Com0comInstalled; StatusMsg: "Setting up virtual COM ports..."
 Filename: "{app}\{#ServiceExe}"; Parameters: "install"; Flags: runhidden; StatusMsg: "Installing the service..."
 Filename: "{app}\{#ServiceExe}"; Parameters: "start"; Flags: runhidden; StatusMsg: "Starting the bridge..."
 Filename: "http://localhost:8080/settings"; Description: "Open the bridge settings"; Flags: postinstall shellexec nowait skipifsilent
