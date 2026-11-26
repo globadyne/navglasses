@@ -13,5 +13,6 @@ a = Analysis(
     excludes=["tkinter", "unittest", "pydoc"],
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="tz-bridge", console=True, upx=False)
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="tz-bridge", console=True, upx=False,
+          icon=str(Path(SPECPATH) / "tz-bridge.ico"))
 coll = COLLECT(exe, a.binaries, a.datas, name="tz-bridge", upx=False)

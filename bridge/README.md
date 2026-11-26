@@ -82,7 +82,9 @@ Open http://localhost:8080 in a browser. You should see heading, speed, depth, a
 
 **Use a virtual COM port (recommended) or TCP, not UDP, when TimeZero and the bridge are on the same PC.** TimeZero's UDP connection also listens on the port it sends to, so a UDP output to `127.0.0.1` goes back to TimeZero itself, and the bridge can't open that port ("Only one usage of each socket address").
 
-**Virtual COM port:**
+**Virtual COM port, with the installer (easiest):** leave **Virtual COM ports** ticked when installing; it installs com0com (Windows asks once to allow its driver: choose Install). Then on the Settings page, under **Links to TimeZero on this PC**, press **Bring TimeZero's output to the bridge**. It makes a pair with real COM names (e.g. COM10 and COM11), adds the bridge's end as an input, and says what to set in TimeZero: an NMEA 0183 output on the other end at 38400 baud. Pairs are made with com0com's `EmuOverrun=yes`, so when one side isn't reading, data is dropped instead of making the sender wait.
+
+**Virtual COM port, by hand:**
 1. Install **com0com** (the signed 64-bit build) and, in its Setup, rename the pair to e.g. **COM10** and **COM11**.
 2. In TimeZero's Connection Wizard, add a **serial output** on **COM10** (4800 baud; 38400 if there are many targets) and tick the sentences below.
 3. Run the bridge on the other end: `python tz_bridge.py --serial COM11:4800`. The speed must match TimeZero's (or use `COM11:auto`).
@@ -184,6 +186,8 @@ Usual speeds: GPS, compass, depth and wind instruments at **4800**; AIS receiver
 **NMEA 2000.** The bridge reads NMEA 0183. To use NMEA 2000 data, either let TimeZero read the network (it supports Actisense NGT-1) and pass it on in its output, or use a gateway that converts NMEA 2000 to 0183 (Actisense NGW-1 on a COM port, or a W2K-1 WiFi gateway set to send NMEA 0183 over TCP or UDP), and add it as another input.
 
 **AIS straight from the receiver.** If TimeZero won't repeat AIS, run the bridge with two inputs: TimeZero on the virtual COM port, and the AIS receiver on its own COM port or WiFi gateway. A transponder's NMEA 0183 output (for example an Icom MA-510TR, 38400 baud) can drive a second USB-serial adapter wired in parallel with TimeZero's, so the bridge gets every ship with its type and size, not only the ones TimeZero sends as TTM.
+
+**The bridge as the splitter.** A COM port can only be open in one program, so to share one receiver between TimeZero and the bridge you used to need a splitter (hub4com, VSPE). The bridge can do it instead: give the receiver's COM input a **Pass on to** port on the Settings page (choose *New virtual pair for TimeZero…*), and the bridge writes every line it reads, unchanged, into a virtual pair whose other end TimeZero reads. Turn off TimeZero's own input from the receiver's port. From the command line: `--serial COM3:38400 --pass-on COM3=COM12`. TimeZero only gets that device's data while the bridge is running (it's a Windows service, so normally always). If TimeZero stops reading, the passed-on lines are dropped and the bridge carries on.
 
 With both, each AIS ship would arrive twice, so the bridge merges them: a TimeZero target reported as AIS is folded into the receiver's report of the same ship (same name, or within 0.15 nm with speed within 2 kn). Radar (ARPA) targets from TimeZero are always kept. A TimeZero AIS target the receiver still hasn't matched after 90 seconds (with the receiver running) came from somewhere the receiver can't hear, in practice TimeZero's online AIS, so it's tagged `ONLINE`: the glasses show it with "ONLINE" and never use it for collision alarms. If the receiver goes quiet for a minute, the bridge stops guessing.
 

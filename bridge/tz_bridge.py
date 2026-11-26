@@ -34,7 +34,9 @@ import json
 import logging
 import math
 import os
+import re
 import socket
+import subprocess
 import sqlite3
 import struct
 import sys
@@ -60,7 +62,9 @@ BAUDS = ("4800", "9600", "19200", "38400", "57600", "115200", "auto")
 # from config.json, edited on the Settings page. Command-line options still work and win.
 def default_config():
     return {
-        "inputs": [],          # {"type": "serial", "port": "COM11", "baud": "4800"} | tcp {host, port} | udp {port}
+        # {"type": "serial", "port": "COM11", "baud": "4800", "forward": "COM12" (optional: pass every
+        #  line on to that port, e.g. a virtual pair to TimeZero)} | tcp {host, port} | udp {port}
+        "inputs": [],
         "tzdb": str(DEFAULT_TZDB) if DEFAULT_TZDB.exists() else "",
         "gpx": [],
         "web_port": 8080,
@@ -103,7 +107,15 @@ def validate_config(c):
                     return None, "Choose a COM port for each serial input."
                 if baud not in BAUDS:
                     return None, f"Unknown speed {baud}."
-                inputs.append({"type": "serial", "port": port, "baud": baud})
+                entry = {"type": "serial", "port": port, "baud": baud}
+                fwd = str(i.get("forward") or "").strip()
+                if fwd:
+                    if fwd.upper() == port.upper():
+                        return None, f"{port} can't pass its data on to itself."
+                    if any(x.get("port", "").upper() == fwd.upper() for x in c.get("inputs", []) if x.get("type") == "serial"):
+                        return None, f"{fwd} is read as an input, so data can't also be passed on to it."
+                    entry["forward"] = fwd
+                inputs.append(entry)
             elif t == "tcp":
                 host, port = str(i.get("host", "")).strip(), int(i.get("port", 0))
                 if not host or not 0 < port < 65536:
@@ -133,6 +145,7 @@ def apply_config(args, cfg, config_path):
     """Fills in args from the settings file, except options given on the command line."""
     if not (args.serial or args.udp or args.tcp or args.replay):
         args.serial = [f"{i['port']}:{i['baud']}" for i in cfg["inputs"] if i["type"] == "serial"]
+        args.pass_on = [f"{i['port']}={i['forward']}" for i in cfg["inputs"] if i["type"] == "serial" and i.get("forward")]
         args.tcp = [f"{i['host']}:{i['port']}" for i in cfg["inputs"] if i["type"] == "tcp"]
         args.udp = [i["port"] for i in cfg["inputs"] if i["type"] == "udp"]
     if args.tzdb is None and cfg.get("tzdb"):
@@ -155,6 +168,71 @@ def list_serial_ports():
     except Exception as e:  # pyserial missing or the OS refused
         log.warning("Couldn't list COM ports: %s", e)
         return []
+
+
+# ---------------------------------------------------------------- virtual COM ports (com0com)
+# com0com makes pairs of virtual COM ports joined like a null-modem cable: what one program writes
+# to COM10 comes out of COM11. The installer can install it; the Settings page makes and removes
+# pairs through com0com's own command-line tool, setupc.exe (needs admin: the service has it).
+# Pairs are made with real COM names (TimeZero only lists COMn ports) and EmuOverrun=yes, so when
+# nobody is reading one end, data is dropped instead of making the writer wait.
+VCOM_PARAMS = "PortName=COM#,EmuOverrun=yes"
+
+
+def setupc_path():
+    for env, default in (("ProgramFiles(x86)", r"C:\Program Files (x86)"), ("ProgramFiles", r"C:\Program Files")):
+        exe = Path(os.environ.get(env, default)) / "com0com" / "setupc.exe"
+        if exe.exists():
+            return exe
+    return None
+
+
+def _setupc(*args, timeout=90):
+    exe = setupc_path()
+    if not exe:
+        raise RuntimeError("com0com isn't installed on this PC. Run the bridge installer again with "
+                           "'Virtual COM ports' ticked, or install com0com yourself.")
+    # setupc must run from its own folder (it loads com0com's driver files from there).
+    r = subprocess.run([str(exe), "--silent", *args], cwd=str(exe.parent), capture_output=True, text=True,
+                       timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    out = (r.stdout or "") + (r.stderr or "")
+    if r.returncode != 0:
+        raise RuntimeError(f"com0com's setupc failed ({r.returncode}): {out.strip()[-400:]}")
+    return out
+
+
+def parse_setupc_list(text):
+    """'CNCA0 PortName=COM10,EmuOverrun=yes' lines -> [{n, a, b, params_a, params_b}], by pair number."""
+    pairs = {}
+    for side, n, rest in re.findall(r"CNC([AB])(\d+)\s+(\S*)", text):
+        prms = dict(kv.split("=", 1) for kv in rest.split(",") if "=" in kv)
+        name = prms.get("RealPortName") or prms.get("PortName")
+        if not name or name in ("-", "COM#"):
+            name = f"CNC{side}{n}"
+        p = pairs.setdefault(int(n), {"n": int(n)})
+        p["a" if side == "A" else "b"] = name
+        p["params_" + side.lower()] = prms
+    return [pairs[k] for k in sorted(pairs) if "a" in pairs[k] and "b" in pairs[k]]
+
+
+def vcom_pairs():
+    return parse_setupc_list(_setupc("list"))
+
+
+def vcom_add_pair():
+    before = {p["n"] for p in vcom_pairs()}
+    _setupc("--wait", "30", "install", VCOM_PARAMS, VCOM_PARAMS)
+    new = [p for p in vcom_pairs() if p["n"] not in before]
+    if not new:
+        raise RuntimeError("com0com didn't report a new pair. Look in Device Manager under "
+                           "'com0com - serial port emulators'.")
+    log.info("Made virtual COM pair %s <-> %s", new[0]["a"], new[0]["b"])
+    return new[0]
+
+
+def vcom_remove_pair(n):
+    _setupc("--wait", "30", "remove", str(int(n)))
+    log.info("Removed virtual COM pair %d", n)
 
 OWN_FIELD_MAX_AGE = 30        # s: drop own-ship values not refreshed
 TARGET_MAX_AGE = 6 * 60       # s: drop AIS vessels not heard from
@@ -1079,8 +1157,91 @@ def detect_baud(ser, port, stop, note):
     return None
 
 
-def serial_reader(port, baud, push, stop, note=lambda s: None):
-    """Reads one COM port. baud=None means detect it (tries the usual NMEA speeds)."""
+class PassOn:
+    """Writes every line read from one COM port out of another (e.g. the AIS receiver's data on
+    to TimeZero through a virtual pair), so no splitter program is needed. Writing happens on its
+    own thread through a small queue: if the other port is stuck or nobody reads it, lines for it
+    are dropped and reading carries on."""
+
+    def __init__(self, port):
+        import queue
+        self.port, self.problem, self.lines, self.dropped = port, "", 0, 0
+        self.q = queue.Queue(maxsize=200)
+        self.th = threading.Thread(target=self._run, daemon=True, name=f"pass on {port}")
+        self.th.start()
+
+    def write(self, raw, baud):
+        try:
+            self.q.put_nowait((raw if raw.endswith(b"\n") else raw + b"\r\n", baud))
+        except Exception:  # queue full: the far end isn't keeping up
+            self.dropped += 1
+
+    def _run(self):
+        import serial
+        ser, retry_at = None, 0.0
+        while True:
+            item = self.q.get()
+            if item is None:
+                break
+            raw, baud = item
+            if ser is None:
+                if time.time() < retry_at:
+                    continue
+                try:
+                    ser = serial.Serial(self.port, baud, write_timeout=2)
+                    self.problem = ""
+                    log.info("Passing data on to %s", self.port)
+                except Exception as e:
+                    self.problem, retry_at = f"can't open {self.port}: {e}", time.time() + 10
+                    log.warning("Pass on: %s (retrying in 10 s)", self.problem)
+                    continue
+            try:
+                ser.write(raw)
+                self.lines += 1
+            except serial.SerialTimeoutException:
+                self.dropped += 1
+            except Exception as e:
+                self.problem, retry_at = f"{self.port}: {e}", time.time() + 10
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+                ser = None
+        if ser is not None:
+            try:
+                ser.close()
+            except Exception:
+                pass
+
+    def status(self):
+        return f"passing on to {self.port}" + (f" ({self.problem})" if self.problem else "")
+
+    def close(self):
+        while True:  # make room for the stop signal
+            try:
+                self.q.put_nowait(None)
+                break
+            except Exception:
+                try:
+                    self.q.get_nowait()
+                except Exception:
+                    pass
+        self.th.join(5)
+
+
+def serial_reader(port, baud, push, stop, note=lambda s: None, forward=None):
+    """Reads one COM port. baud=None means detect it (tries the usual NMEA speeds).
+    forward: another COM port to pass every line on to, unchanged."""
+    import serial  # pyserial
+    out = PassOn(forward) if forward else None
+    try:
+        _serial_reader(port, baud, push, stop, note, out)
+    finally:
+        if out:
+            out.close()
+
+
+def _serial_reader(port, baud, push, stop, note, out):
     import serial  # pyserial
     while not stop.is_set():
         try:
@@ -1091,12 +1252,19 @@ def serial_reader(port, baud, push, stop, note=lambda s: None):
                     log.warning("%s: no NMEA found at %s baud (retrying)", port, "/".join(map(str, AUTO_BAUDS)))
                     continue
                 ser.baudrate = use
-                note(f"{use} baud")
+                shown = f"{use} baud" + (", " + out.status() if out else "")
+                note(shown)
                 log.info("Reading %s at %d baud", port, use)
                 while not stop.is_set():
                     raw = ser.readline()
                     if raw:
                         push(raw.decode("ascii", errors="ignore"))
+                        if out:
+                            out.write(raw, use)
+                            now = f"{use} baud, " + out.status()
+                            if now != shown:
+                                shown = now
+                                note(now)
         except Exception as e:
             if stop.is_set():
                 return
@@ -1195,6 +1363,43 @@ def build_app(state, interval, control=None):
             asyncio.get_running_loop().call_later(0.5, restart.set)  # after this reply has gone out
         return web.json_response({"ok": True, "web_port": cfg["web_port"]})
 
+    def local_only(request):
+        if request.remote not in ("127.0.0.1", "::1"):
+            return web.json_response({"error": "Virtual COM ports can only be changed on the nav PC itself."},
+                                     status=403)
+        return None
+
+    async def get_vcom(_):
+        loop = asyncio.get_running_loop()
+        if not setupc_path():
+            return web.json_response({"installed": False, "pairs": []})
+        try:
+            pairs = await loop.run_in_executor(None, vcom_pairs)
+            return web.json_response({"installed": True, "pairs": pairs})
+        except Exception as e:
+            return web.json_response({"installed": True, "pairs": [], "error": str(e)})
+
+    async def post_vcom(request):
+        denied = local_only(request)
+        if denied:
+            return denied
+        if request.content_type != "application/json":
+            return web.json_response({"error": "Expected JSON."}, status=415)
+        body = await request.json()
+        loop = asyncio.get_running_loop()
+        try:
+            if body.get("action") == "add":
+                pair = await loop.run_in_executor(None, vcom_add_pair)
+                return web.json_response({"ok": True, "pair": pair})
+            if body.get("action") == "remove":
+                await loop.run_in_executor(None, vcom_remove_pair, int(body["n"]))
+                return web.json_response({"ok": True})
+            return web.json_response({"error": "Unknown action."}, status=400)
+        except (KeyError, ValueError, TypeError):
+            return web.json_response({"error": "Which pair?"}, status=400)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
     async def state_json(_):
         return web.json_response(state.snapshot())
 
@@ -1246,6 +1451,8 @@ def build_app(state, interval, control=None):
     app.router.add_get("/settings", settings_page)
     app.router.add_get("/api/config", get_config)
     app.router.add_post("/api/config", post_config)
+    app.router.add_get("/api/vcom", get_vcom)
+    app.router.add_post("/api/vcom", post_vcom)
     app.cleanup_ctx.append(broadcaster)
     return app
 
@@ -1351,9 +1558,11 @@ async def main_async(args, control=None):
 
     stop = threading.Event()
     serial_threads = []
+    pass_on = dict(x.split("=", 1) for x in (getattr(args, "pass_on", None) or []) if "=" in x)
     for spec in args.serial or []:
         port, baud = parse_serial_spec(spec, args.baud)
-        th = threading.Thread(target=serial_reader, args=(port, baud, threadsafe(pusher(port)), stop, noter(port)),
+        th = threading.Thread(target=serial_reader, args=(port, baud, threadsafe(pusher(port)), stop, noter(port),
+                                                          pass_on.get(port)),
                               daemon=True)
         th.start()
         serial_threads.append(th)
@@ -1447,6 +1656,9 @@ def main():
     p.add_argument("--config", help="settings file, edited on the Settings page "
                                      "(the installed bridge uses C:\\ProgramData\\TZ Glasses Bridge\\config.json)")
     p.add_argument("--record", help="also save the raw NMEA received to this file (appends; play it back with --replay)")
+    p.add_argument("--pass-on", action="append", metavar="COMx=COMy",
+                   help="pass every line read from serial input COMx on to COMy, e.g. an AIS receiver on to "
+                        "TimeZero through a virtual COM pair; repeatable")
     p.add_argument("--forward-udp", help="also re-send raw NMEA to host:port (e.g. 255.255.255.255:10110)")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()

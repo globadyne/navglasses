@@ -12,3 +12,4 @@ __pycache__/
 dist/
 bridge/installer/tz-bridge-service.exe
 *.spec.bak
+bridge/installer/com0com-setup.exe

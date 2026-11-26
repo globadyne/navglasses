@@ -1,0 +1,13 @@
+Virtual COM ports: com0com
+==========================
+
+The TZ Glasses Bridge installer can install com0com 2.2.2.0 (signed x64 build), the
+null-modem emulator by Vyacheslav Frolov, unmodified. It makes pairs of virtual COM ports
+so TimeZero and the bridge can pass NMEA to each other on the same PC.
+
+com0com is free software under the GNU General Public License, version 2.
+Its source code and licence: https://sourceforge.net/projects/com0com/
+
+com0com is installed and uninstalled separately from the bridge: remove it from
+Windows Settings > Apps ("com0com") if you no longer need it. Removing the bridge leaves
+it in place, because TimeZero may still be using its ports.

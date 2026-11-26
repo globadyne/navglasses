@@ -54,6 +54,24 @@ jobs:
       - name: Get WinSW (service wrapper)
         run: Invoke-WebRequest https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe -OutFile bridge\installer\tz-bridge-service.exe
 
+      # com0com (virtual COM port pairs, GPL, by Vyacheslav Frolov), bundled unmodified as an optional
+      # installer task. If SourceForge refuses the download, the installer is built without it.
+      - name: Get com0com (signed 2.2.2.0, x64)
+        continue-on-error: true
+        run: |
+          $zip = "$env:RUNNER_TEMP\com0com.zip"
+          curl.exe -fsSL --retry 3 -A "Mozilla/5.0" -o $zip "https://downloads.sourceforge.net/project/com0com/com0com/2.2.2.0/com0com-2.2.2.0-x64-fre-signed.zip"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::warning::Couldn't download com0com; building the installer without virtual COM ports"; exit 0 }
+          Write-Host "com0com zip SHA-256: $((Get-FileHash $zip).Hash)"
+          Expand-Archive $zip "$env:RUNNER_TEMP\com0com" -Force
+          Get-ChildItem -Recurse "$env:RUNNER_TEMP\com0com" | Select-Object FullName, Length | Format-Table -AutoSize
+          $setup = Get-ChildItem -Recurse "$env:RUNNER_TEMP\com0com" -Filter "Setup*.exe" | Select-Object -First 1
+          if (-not $setup) { Write-Host "::warning::No setup .exe in the com0com download"; exit 0 }
+          $sig = Get-AuthenticodeSignature $setup.FullName
+          Write-Host "Signature: $($sig.Status) by $($sig.SignerCertificate.Subject)"
+          Copy-Item $setup.FullName bridge\installer\com0com-setup.exe
+          Write-Host "Bundling $($setup.Name)"
+
       - name: Build the installer
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
@@ -65,7 +83,8 @@ jobs:
       - name: Test the installer (install, check the service, uninstall)
         run: |
           $setup = Get-ChildItem dist\TZ-Glasses-Bridge-Setup-*.exe | Select-Object -First 1
-          Start-Process $setup.FullName -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+          # Virtual COM ports are tested in their own step below (a driver install can ask for approval).
+          Start-Process $setup.FullName -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /MERGETASKS=!vcom" -Wait
           Start-Sleep 8
           $svc = Get-Service TZGlassesBridge
           Write-Host "Service: $($svc.Status) $($svc.StartType)"
@@ -87,6 +106,42 @@ jobs:
           Start-Sleep 3
           if (Get-Service TZGlassesBridge -ErrorAction SilentlyContinue) { throw "Uninstall left the service behind" }
           Write-Host "Install, settings and uninstall all worked"
+
+      # Installs the bundled com0com and makes a pair through the bridge's own Settings API, as the
+      # Settings page does. Allowed to fail: GitHub's Windows machines may refuse a kernel driver.
+      - name: Test virtual COM ports (com0com)
+        if: hashFiles('bridge/installer/com0com-setup.exe') != ''
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          # Trust the publisher first, as clicking "Install" on Windows' driver prompt would.
+          $sig = Get-AuthenticodeSignature bridge\installer\com0com-setup.exe
+          if ($sig.SignerCertificate) {
+            [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\c0c.cer", $sig.SignerCertificate.Export("Cert"))
+            certutil -addstore TrustedPublisher "$env:RUNNER_TEMP\c0c.cer" | Out-Null
+          }
+          Start-Process bridge\installer\com0com-setup.exe -ArgumentList "/S" -Wait
+          $setupc = @("${env:ProgramFiles(x86)}\com0com\setupc.exe", "${env:ProgramFiles}\com0com\setupc.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $setupc) { throw "com0com installed no setupc.exe" }
+          Write-Host "setupc: $setupc"
+          New-Item -ItemType Directory "$env:RUNNER_TEMP\vc" -Force | Out-Null
+          '{"inputs": [], "web_port": 8092}' | Out-File -Encoding ascii "$env:RUNNER_TEMP\vc\config.json"
+          $p = Start-Process dist\tz-bridge\tz-bridge.exe -ArgumentList "--config `"$env:RUNNER_TEMP\vc\config.json`"" -PassThru -NoNewWindow
+          Start-Sleep 6
+          $v = Invoke-RestMethod http://127.0.0.1:8092/api/vcom
+          Write-Host "Before: installed $($v.installed), pairs $($v.pairs | ConvertTo-Json -Compress)"
+          $add = Invoke-RestMethod http://127.0.0.1:8092/api/vcom -Method Post -ContentType "application/json" -Body '{"action": "add"}'
+          Write-Host "Made pair: $($add.pair.a) <-> $($add.pair.b)"
+          if ($add.pair.a -notmatch '^COM\d+$' -or $add.pair.b -notmatch '^COM\d+$') { throw "The new pair has no COM names" }
+          # Data written into one end must come out of the other.
+          $a = New-Object System.IO.Ports.SerialPort $add.pair.a, 38400; $b = New-Object System.IO.Ports.SerialPort $add.pair.b, 38400
+          $b.ReadTimeout = 3000; $a.Open(); $b.Open()
+          $a.Write("`$HEHDT,158.0,T*23`r`n"); $line = $b.ReadLine(); $a.Close(); $b.Close()
+          Write-Host "Through the pair: $line"
+          if ($line -notlike '*HEHDT*') { throw "Nothing came through the virtual pair" }
+          Invoke-RestMethod http://127.0.0.1:8092/api/vcom -Method Post -ContentType "application/json" -Body (@{ action = "remove"; n = $add.pair.n } | ConvertTo-Json) | Out-Null
+          Stop-Process $p
+          Write-Host "Virtual COM ports work: pair made, data passed, pair removed"
 
       - uses: actions/upload-artifact@v4
         with:
