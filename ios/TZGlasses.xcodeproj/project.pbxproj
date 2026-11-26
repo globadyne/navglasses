@@ -45,6 +45,7 @@
 		AA0000000000001B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AA0000000000001E /* TZGlasses.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TZGlasses.entitlements; sourceTree = "<group>"; };
 		AA0000000000001D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AA0000000000F001 /* Meta.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Meta.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -67,8 +68,17 @@
 			isa = PBXGroup;
 			children = (
 				AC0000000000002D /* TZGlasses */,
+				AC0000000000F001 /* Config */,
 				AC0000000000002C /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		AC0000000000F001 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000F001 /* Meta.xcconfig */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 		AC0000000000002C /* Products */ = {
@@ -197,6 +207,7 @@
 /* Begin XCBuildConfiguration section */
 		A200000000000033 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AA0000000000F001 /* Meta.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -222,6 +233,7 @@
 		};
 		A200000000000034 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AA0000000000F001 /* Meta.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

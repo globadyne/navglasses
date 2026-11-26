@@ -1,0 +1,10 @@
+// The app's credentials from Meta's Wearables Developer Center (https://wearables.developer.meta.com/).
+// Empty is fine for your own glasses in Developer Mode; testers' glasses need the real ones.
+//
+// Don't put them here: copy MetaSecrets.xcconfig.example to MetaSecrets.xcconfig (next to this
+// file, kept out of git) and fill that in. It overrides the empty values below.
+
+META_APP_ID =
+CLIENT_TOKEN =
+
+#include? "MetaSecrets.xcconfig"

@@ -24,7 +24,7 @@ Regenerate the Xcode project after adding or removing Swift files: `python3 ios/
 
 ## TestFlight readiness (2026-11-26)
 
-App icon is `Assets.xcassets/AppIcon.appiconset/AppIcon.png` (1024 px, no alpha; drawn by a throwaway Swift script, same mark as the bridge). Info.plist declares `ITSAppUsesNonExemptEncryption = NO` (plain ws:// to the bridge, no own crypto) and only the Bluetooth background modes (`processing` was removed: no BGTask code). Still open before the first upload: a paid Apple Developer membership, the bundle ID (`com.keltonnickerson.tzglasses` is personal), and real `META_APP_ID` / `CLIENT_TOKEN` from Meta's Wearables Developer Center (the MWDAT keys in Info.plist are build-setting placeholders).
+App icon is `Assets.xcassets/AppIcon.appiconset/AppIcon.png` (1024 px, no alpha; drawn by a throwaway Swift script, same mark as the bridge). Info.plist declares `ITSAppUsesNonExemptEncryption = NO` (plain ws:// to the bridge, no own crypto) and only the Bluetooth background modes (`processing` was removed: no BGTask code). Still open before the first upload: a paid Apple Developer membership, the bundle ID (`com.keltonnickerson.tzglasses` is personal), and real `META_APP_ID` / `CLIENT_TOKEN` from Meta's Wearables Developer Center. They come from `ios/Config/Meta.xcconfig` (empty defaults, the target's base configuration, set up by `make_xcodeproj.py`), which optionally includes the git-ignored `ios/Config/MetaSecrets.xcconfig` (template: `MetaSecrets.xcconfig.example`). Android's equivalent is `android/local.properties`.
 
 ## Meta SDK facts (verified from 1.1.0 interface files, not guessed)
 

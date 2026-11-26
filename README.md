@@ -48,6 +48,8 @@ See `android/README.md`. In short: open the `android/` folder in Android Studio,
 3. Tap **Connect glasses**, then choose **Glasses** as the head direction source.
 4. Look at the bow and tap (pinch with the Neural Band) to re-centre.
 
+**Testers' glasses need the app's Meta credentials.** Your own glasses in Developer Mode work without them. For anyone else, register the app in the [Wearables Developer Center](https://wearables.developer.meta.com/) (with the app's bundle ID and your Apple Team ID) to get its **App ID** and **Client Token**. iPhone: copy `ios/Config/MetaSecrets.xcconfig.example` to `ios/Config/MetaSecrets.xcconfig` and fill it in. Android: put them in `android/local.properties` (see `android/README.md`). Both files are kept out of git.
+
 **Motion and Inputs are experimental in Meta's SDK.** They work in Developer Mode, but if the app shows "Motion: Not enabled for this app", enable Motion (and Inputs, for gestures) for your app in the [Wearables Developer Center](https://wearables.developer.meta.com/). Until then, the **Phone** or **Slider** head sources still let you use the lens.
 
 ## 4. On the boat

@@ -34,6 +34,8 @@ target, project = oid("AF"), oid("A0")
 ph_sources, ph_frameworks, ph_resources = oid("A1"), oid("A1"), oid("A1")
 cfg_t_dbg, cfg_t_rel, cfg_p_dbg, cfg_p_rel = oid("A2"), oid("A2"), oid("A2"), oid("A2")
 list_t, list_p = oid("A3"), oid("A3")
+# Fixed IDs (outside the counter) so adding these didn't renumber everything else.
+xcconfig_ref, config_group = "AA0000000000F001", "AC0000000000F001"
 
 target_settings = """
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -85,6 +87,7 @@ for f in swift:
 w(f"\t\t{assets_ref} /* Assets.xcassets */ = {{isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = \"<group>\"; }};\n")
 w(f"\t\t{ent_ref} /* {APP}.entitlements */ = {{isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = {APP}.entitlements; sourceTree = \"<group>\"; }};\n")
 w(f"\t\t{plist_ref} /* Info.plist */ = {{isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = \"<group>\"; }};\n")
+w(f"\t\t{xcconfig_ref} /* Meta.xcconfig */ = {{isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Meta.xcconfig; sourceTree = \"<group>\"; }};\n")
 w("/* End PBXFileReference section */\n\n")
 
 w("/* Begin PBXFrameworksBuildPhase section */\n")
@@ -94,7 +97,8 @@ for p in PRODUCTS:
 w("\t\t\t);\n\t\t\trunOnlyForDeploymentPostprocessing = 0;\n\t\t};\n/* End PBXFrameworksBuildPhase section */\n\n")
 
 w("/* Begin PBXGroup section */\n")
-w(f"\t\t{main_group} = {{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n\t\t\t\t{app_group} /* {APP} */,\n\t\t\t\t{products_group} /* Products */,\n\t\t\t);\n\t\t\tsourceTree = \"<group>\";\n\t\t}};\n")
+w(f"\t\t{main_group} = {{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n\t\t\t\t{app_group} /* {APP} */,\n\t\t\t\t{config_group} /* Config */,\n\t\t\t\t{products_group} /* Products */,\n\t\t\t);\n\t\t\tsourceTree = \"<group>\";\n\t\t}};\n")
+w(f"\t\t{config_group} /* Config */ = {{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n\t\t\t\t{xcconfig_ref} /* Meta.xcconfig */,\n\t\t\t);\n\t\t\tpath = Config;\n\t\t\tsourceTree = \"<group>\";\n\t\t}};\n")
 w(f"\t\t{products_group} /* Products */ = {{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n\t\t\t\t{app_ref} /* {APP}.app */,\n\t\t\t);\n\t\t\tname = Products;\n\t\t\tsourceTree = \"<group>\";\n\t\t}};\n")
 w(f"\t\t{app_group} /* {APP} */ = {{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n")
 for f in swift:
@@ -127,7 +131,8 @@ w("\t\t\t);\n\t\t\trunOnlyForDeploymentPostprocessing = 0;\n\t\t};\n/* End PBXSo
 
 w("/* Begin XCBuildConfiguration section */\n")
 for cid, name, extra in ((cfg_t_dbg, "Debug", ""), (cfg_t_rel, "Release", "")):
-    w(f"\t\t{cid} /* {name} */ = {{\n\t\t\tisa = XCBuildConfiguration;\n\t\t\tbuildSettings = {{{target_settings}{extra}\n\t\t\t}};\n\t\t\tname = {name};\n\t\t}};\n")
+    # Meta's App ID and Client Token come from Config/Meta.xcconfig (and its uncommitted MetaSecrets.xcconfig).
+    w(f"\t\t{cid} /* {name} */ = {{\n\t\t\tisa = XCBuildConfiguration;\n\t\t\tbaseConfigurationReference = {xcconfig_ref} /* Meta.xcconfig */;\n\t\t\tbuildSettings = {{{target_settings}{extra}\n\t\t\t}};\n\t\t\tname = {name};\n\t\t}};\n")
 dbg = project_common + """
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_TESTABILITY = YES;
