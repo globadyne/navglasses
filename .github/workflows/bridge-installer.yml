@@ -56,14 +56,18 @@ jobs:
 
       # com0com (virtual COM port pairs, GPL, by Vyacheslav Frolov), bundled unmodified as an optional
       # installer task. If SourceForge refuses the download, the installer is built without it.
+      # Pinned to the zip's known SHA-256: a different file fails the build instead of being bundled.
       - name: Get com0com (signed 2.2.2.0, x64)
-        continue-on-error: true
+        env:
+          COM0COM_SHA256: 3BC7313E8577774CE78CFF4D1C816FAF96CFA48C485BBCC5527D4569F7D5E373
         run: |
           $zip = "$env:RUNNER_TEMP\com0com.zip"
           # SourceForge turns away requests that claim to be a browser (403); a plain download tool gets the file.
           curl.exe -fsSL --retry 3 -A "Wget/1.21" -o $zip "https://downloads.sourceforge.net/project/com0com/com0com/2.2.2.0/com0com-2.2.2.0-x64-fre-signed.zip"
           if ($LASTEXITCODE -ne 0) { Write-Host "::warning::Couldn't download com0com; building the installer without virtual COM ports"; exit 0 }
-          Write-Host "com0com zip SHA-256: $((Get-FileHash $zip).Hash)"
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+          Write-Host "com0com zip SHA-256: $hash"
+          if ($hash -ne $env:COM0COM_SHA256) { Write-Host "::error::The com0com download doesn't match its pinned SHA-256 ($env:COM0COM_SHA256). Not bundling it."; exit 1 }
           Expand-Archive $zip "$env:RUNNER_TEMP\com0com" -Force
           Get-ChildItem -Recurse "$env:RUNNER_TEMP\com0com" | Select-Object FullName, Length | Format-Table -AutoSize
           $setup = Get-ChildItem -Recurse "$env:RUNNER_TEMP\com0com" -Filter "setup.exe" | Select-Object -First 1
