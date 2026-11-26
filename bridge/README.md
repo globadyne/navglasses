@@ -34,11 +34,13 @@ For every AIS target, it works out range, true bearing, bearing relative to your
 2. Run it. It installs the bridge as a Windows service named **TZ Glasses Bridge** that starts with
    Windows and restarts itself if it ever stops, and lets phones reach it through the firewall.
    Nothing else is needed: Python and everything the bridge uses are inside.
+   Leave **Virtual COM ports** ticked to install com0com (see "Connect TimeZero" below).
 3. The Settings page opens at the end (later: Start menu → **TZ Glasses Bridge Settings**, or
-   http://localhost:8080/settings). Add where the NMEA comes from (for example the virtual COM port
-   TimeZero sends to, and its speed) and press **Save**. TimeZero's database is found automatically.
-4. The status page (Start menu → **TZ Glasses Bridge**) shows each input's line count and the
-   address to type into the phone app.
+   http://localhost:8080/settings). Add where the NMEA comes from and press **Save**. With TimeZero on
+   the same PC, **Bring TimeZero's output to the bridge** sets up a virtual COM pair for you. TimeZero's
+   database is found automatically.
+4. The status page (Start menu → **TZ Glasses Bridge**) shows each input's live data and, at the top,
+   the address to type into the phone app.
 
 Settings are kept in `C:\ProgramData\TZ Glasses Bridge\config.json` and survive upgrades: run a newer
 installer over the old one. The service log is in `C:\ProgramData\TZ Glasses Bridge\logs`. Settings can
