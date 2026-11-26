@@ -18,9 +18,6 @@
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
-	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<!-- Meta AI calls the app back on this scheme after registration -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -34,38 +31,34 @@
 			</array>
 		</dict>
 	</array>
-	<!-- Meta Wearables Device Access Toolkit. Empty MetaAppID = Developer Mode. -->
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>MWDAT</key>
 	<dict>
 		<key>AppLinkURLScheme</key>
 		<string>tzglasses://</string>
-		<key>MetaAppID</key>
-		<string>$(META_APP_ID)</string>
 		<key>ClientToken</key>
 		<string>$(CLIENT_TOKEN)</string>
+		<key>MetaAppID</key>
+		<string>$(META_APP_ID)</string>
 		<key>TeamID</key>
 		<string>$(DEVELOPMENT_TEAM)</string>
 	</dict>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>processing</string>
-		<string>bluetooth-central</string>
-		<string>bluetooth-peripheral</string>
-	</array>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>TZ Glasses uses Bluetooth to show navigation on your Meta glasses.</string>
-	<!-- The TZ Bridge runs on the nav PC on the boat's WiFi -->
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>TZ Glasses connects to the TZ Bridge on your nav PC to get position, AIS and route data.</string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_bonjour._tcp</string>
-	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>TZ Glasses uses Bluetooth to show navigation on your Meta glasses.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_bonjour._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>TZ Glasses connects to the TZ Bridge on your nav PC to get position, AIS and route data.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Used to test head tracking with the phone when the glasses aren't connected.</string>
 	<key>UIApplicationSceneManifest</key>
@@ -73,6 +66,11 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>

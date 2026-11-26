@@ -22,6 +22,10 @@ Android: open `android/` in Android Studio, sync, `./gradlew test assembleDebug`
 
 Regenerate the Xcode project after adding or removing Swift files: `python3 ios/make_xcodeproj.py`. Or convert to Xcode's synchronized folders if you prefer.
 
+## TestFlight readiness (2026-11-26)
+
+App icon is `Assets.xcassets/AppIcon.appiconset/AppIcon.png` (1024 px, no alpha; drawn by a throwaway Swift script, same mark as the bridge). Info.plist declares `ITSAppUsesNonExemptEncryption = NO` (plain ws:// to the bridge, no own crypto) and only the Bluetooth background modes (`processing` was removed: no BGTask code). Still open before the first upload: a paid Apple Developer membership, the bundle ID (`com.keltonnickerson.tzglasses` is personal), and real `META_APP_ID` / `CLIENT_TOKEN` from Meta's Wearables Developer Center (the MWDAT keys in Info.plist are build-setting placeholders).
+
 ## Meta SDK facts (verified from 1.1.0 interface files, not guessed)
 
 - SPM: `https://github.com/meta/meta-wearables-dat-ios`, exact 1.1.0. Products: MWDATCore, MWDATDisplay, MWDATMotion, MWDATInputs, MWDATMockDevice.
