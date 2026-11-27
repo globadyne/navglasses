@@ -9,7 +9,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 APP = "TZGlasses"
 SRC = HERE / APP
-BUNDLE_ID = "com.keltonnickerson.tzglasses"   # must be unique to your Apple team
+BUNDLE_ID = "com.hinesmarine.tzglasses"   # must be unique to your Apple team
 DEVELOPMENT_TEAM = "YP59H7P335"   # Kelton Nickerson (Personal Team); set to your own team ID
 SDK_VERSION = "1.1.0"
 PRODUCTS = ["MWDATCore", "MWDATDisplay", "MWDATMotion", "MWDATInputs", "MWDATMockDevice"]

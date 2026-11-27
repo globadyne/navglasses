@@ -21,7 +21,7 @@ android {
   compileSdk = 36
 
   defaultConfig {
-    applicationId = "com.tzglasses.hud"
+    applicationId = "com.hinesmarine.tzglasses"
     minSdk = 31
     targetSdk = 36
     versionCode = 1

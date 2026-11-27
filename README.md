@@ -32,7 +32,7 @@ TimeZero's marks, routes and tracks are read from its database automatically (re
 **You need:** Xcode 26.4 or newer, an iPhone on iOS 17.2+, your Apple ID added in Xcode (a free account works, but apps installed with it expire after 7 days), and the Meta AI app on the iPhone.
 
 1. Open `ios/TZGlasses.xcodeproj`. Xcode fetches Meta's SDK (version 1.1.0) on its own the first time.
-2. Select the **TZGlasses** target → **Signing & Capabilities** → pick your **Team**. If Xcode says the bundle identifier is taken, change `com.tzglasses.hud` to something unique, such as `com.yourname.tzglasses`.
+2. Select the **TZGlasses** target → **Signing & Capabilities** → pick your **Team**. If Xcode says the bundle identifier is taken, change `com.hinesmarine.tzglasses` (in `ios/make_xcodeproj.py`) to something unique, such as `com.yourname.tzglasses`.
 3. Plug in the iPhone, choose it as the run destination, and press **Run**.
 
 **Try it with no glasses and no boat first.** The app starts with demo data (Halifax Harbour). In Settings, turn on **Simulated glasses**, then on the main screen choose **Phone** as the head direction source. Hold the phone up and turn around: the lens view shows labels moving across, and the cargo ship turns into a collision alarm within about a minute.
