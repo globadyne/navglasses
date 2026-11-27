@@ -408,6 +408,12 @@ enum HUDBuilder {
       f.footer = String(format: "DEPTH %.0f M", d)
     }
 
+    // No heading and no course (no compass, not moving), and no fixed heading in Settings:
+    // there's no way to tell where anything is relative to the bow, so place nothing.
+    guard snap.referenceHeading != nil else {
+      f.message = "No heading from the boat. Set a fixed heading in Settings"
+      return f
+    }
     guard let gaze else {
       f.message = "Look at the bow and tap to start"
       return f

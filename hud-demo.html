@@ -177,6 +177,25 @@
     </div>
 
     <div class="panel">
+      <h2>Boat heading</h2>
+      <div class="row">
+        <div class="seg" role="radiogroup" aria-label="Where the heading comes from">
+          <label><input type="radio" name="hdgsrc" value="compass" checked><span>Compass</span></label>
+          <label><input type="radio" name="hdgsrc" value="course"><span>Course only</span></label>
+          <label><input type="radio" name="hdgsrc" value="none"><span>None, tied up</span></label>
+        </div>
+      </div>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="fixed-on"> Fixed heading when there's no compass</label>
+      </div>
+      <div class="row" id="fixed-row" hidden>
+        <input type="range" id="fixed-hdg" min="0" max="359" step="1" value="160" aria-label="Fixed heading">
+        <span class="readout" id="fixed-out">Bow points 160° true</span>
+      </div>
+      <p class="hint" id="hdg-hint"></p>
+    </div>
+
+    <div class="panel">
       <h2>Head direction</h2>
       <input type="range" id="yaw" min="-180" max="180" step="1" value="0" aria-label="Head turn relative to the bow">
       <div class="row">
@@ -229,6 +248,7 @@
             <div class="ios-status"><span class="dot" style="background: var(--ios-green)"></span><b>Glasses</b><span>Ray-Ban Display</span></div>
             <div class="ios-status"><span class="dot" style="background: var(--ios-green)"></span><b>Head tracking</b><span id="ios-head">Glasses: looking at the bow</span></div>
             <div class="ios-status"><span class="dot" style="background: var(--ios-green)"></span><b>Boat data</b><span>Live</span></div>
+            <div class="ios-status"><span class="dot" id="ios-hdg-dot" style="background: var(--ios-green)"></span><b>Heading</b><span id="ios-hdg">Compass</span></div>
             <div class="ios-status"><span class="dot" id="ios-route-dot" style="background: var(--ios-muted)"></span><b>Route</b><span id="ios-route">None active</span></div>
           </div>
           <div>
@@ -316,6 +336,14 @@
   // ---------- scenario (same as DemoFeed.swift)
   let own, targets, buoys, marks, wp, simT, ackUntil, route, nextWp, ownTrack, savedTrack;
   let routeActive = false, showMarks = true, showTracks = true, dangerAlarm = true;
+  // Boat heading as the bridge reports it (BoatData.referenceHeading = HDG, else COG), with the app's
+  // fixed heading standing in when neither arrives. own.hdg stays the real bow, for the world view.
+  let hdgSrc = "compass", fixedOn = false, fixedHdg = 160;
+  function reported() {
+    if (hdgSrc === "compass") return { ref: own.hdg, set: false };
+    if (hdgSrc === "course") return { ref: own.cog, set: false };
+    return fixedOn ? { ref: fixedHdg, set: true } : { ref: null, set: false };
+  }
   // Target sources: each can be shown or hidden, with its own colour (like TimeZero's target settings)
   const SRC = {
     ais: { on: true, color: "#8ff0c7", label: "AIS" },
@@ -373,7 +401,8 @@
   }
   function step(dt) {
     simT += dt;
-    own.hdg = 160 + 4 * Math.sin(simT / 25); own.cog = own.hdg;
+    own.sog = hdgSrc === "none" ? 0 : 6.5;
+    if (own.sog > 0) { own.hdg = 160 + 4 * Math.sin(simT / 25); own.cog = own.hdg; }
     Object.assign(own, move(own, own.sog, own.cog, dt));
     targets.forEach(t => Object.assign(t, move(t, t.sog, t.cog, dt)));
     const lastPt = ownTrack[ownTrack.length - 1];
@@ -408,18 +437,23 @@
 
   // ---------- HUD frame (mirrors HUDBuilder.build)
   function buildFrame(gaze) {
-    const f = { heading: `HDG ${three(own.hdg)}°`, speed: `${own.sog.toFixed(1)} KN`, gazeText: `${three(gaze)}°`, items: [], edges: [] };
+    const R = reported(), hdg = R.ref;
     const gt = targets.filter(shown).map(t => ({ t, g: geom(own, t), s: 0 }));
+    if (hdg === null) {   // no heading, no course, no fixed heading: nothing can be placed (HUDBuilder)
+      return { f: { heading: "HDG ---", speed: `${own.sog.toFixed(1)} KN`, gazeText: "", items: [], marks: [], edges: [], footer: "",
+        message: "NO HEADING FROM THE BOAT", messageDetail: "SET A FIXED HEADING IN SETTINGS" }, gt, gw: geom(own, wp) };
+    }
+    const f = { heading: `HDG ${three(hdg)}°` + (R.set ? " SET" : ""), speed: `${own.sog.toFixed(1)} KN`, gazeText: `${three(gaze)}°`, items: [], edges: [] };
     gt.forEach(o => (o.s = severity(o.g)));
     const threats = gt.filter(o => o.s > 0).sort((a, b) => a.g.cpa - b.g.cpa);
     // A danger mark ahead outranks a caution vessel; a danger vessel outranks the mark.
     const mt = markThreats();
     if (mt.length && simT > ackUntil && !(threats.length && threats[0].s === 2)) {
-      const a = mt[0], rel = Math.round(wrap(a.g.brg - own.hdg)), mins = a.g.rng * Math.cos(rel * Math.PI / 180) / own.sog * 60;
-      f.alarmTitle = `DANGER MARK ${a.g.rng.toFixed(2)} NM` + (a.g.rng > S.dangerPass ? ` · ${Math.max(1, Math.round(mins))} MIN` : "");
+      const a = mt[0], rel = Math.round(wrap(a.g.brg - hdg)), mins = a.g.rng * Math.cos(rel * Math.PI / 180) / own.sog * 60;
+      f.alarmTitle = `DANGER MARK ${a.g.rng.toFixed(2)} NM` + (a.g.rng > S.dangerPass && own.sog > 0.1 ? ` · ${Math.max(1, Math.round(mins))} MIN` : "");
       f.alarmDetail = `${short(a.m.name)} · ` + (Math.abs(rel) <= 2 ? "DEAD AHEAD" : `${Math.abs(rel)}° ${rel < 0 ? "PORT" : "STBD"}`);
     } else if (threats.length && simT > ackUntil) {
-      const a = threats[0], rel = Math.round(wrap(a.g.brg - own.hdg));
+      const a = threats[0], rel = Math.round(wrap(a.g.brg - hdg));
       f.alarmTitle = `CPA ${a.g.cpa.toFixed(2)} NM IN ${Math.round(a.g.tcpa)} MIN`;
       f.alarmDetail = `${short(a.t.name)} · ${Math.abs(rel)}° ${rel < 0 ? "PORT" : "STBD"}`;
     }
@@ -571,6 +605,14 @@
     const W = 600, H = 600;
     const look = currentLook(), night = look !== "day";
     c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
+    if (f.message) {
+      txt(c, f.heading, 24, 20, `500 28px ${MONO}`, HUD);
+      txt(c, f.speed, W - 24, 20, `500 28px ${MONO}`, HUD, "right");
+      txt(c, f.message, W / 2, 270, `600 34px ${COND}`, AMBER, "center");
+      txt(c, f.messageDetail, W / 2, 316, `400 20px ${MONO}`, HUD_DIM, "center");
+      if (look === "nightRed") { c.globalCompositeOperation = "multiply"; c.fillStyle = "#f00"; c.fillRect(0, 0, W, H); c.globalCompositeOperation = "source-over"; }
+      return;
+    }
 
     // Ground layer: tracks, then the route, then marks
     if (showTracks) {
@@ -665,6 +707,11 @@
     txt(c, f.heading, P, P, `500 22px ${SANS}`, PRI);
     txt(c, f.gazeText, W / 2, P, `500 22px ${SANS}`, SEC, "center");
     txt(c, f.speed, W - P, P, `500 22px ${SANS}`, PRI, "right");
+    if (f.message) {
+      txt(c, f.message, W / 2, 260, `600 30px ${SANS}`, PRI, "center");
+      txt(c, f.messageDetail, W / 2, 304, `500 22px ${SANS}`, SEC, "center");
+      return;
+    }
     let y = P + 44;
     // Meta's components can't draw lines, so the route and tracks don't appear in Text mode; marks do, as rows.
     [...f.items, ...(f.marks || []).map(m => ({ ...m, sev: 0 }))].slice(0, 3).forEach(it => {
@@ -1081,7 +1128,7 @@
   function render(now) {
     const c = vctx, fov = fovView(), ppd = W / fov, hy = H * 0.5;
     const hTrue = own.hdg + yawTrue;
-    const gazeEst = own.hdg + lagSample(now) + driftErr + fineTune;
+    const gazeEst = (reported().ref ?? 0) + lagSample(now) + driftErr + fineTune;
     const { f, gt, gw } = buildFrame(gazeEst);
     lastFrame = f;
     if (lensMode === "picture") renderPicture(lctx, f, gazeEst, now / 1000, ppd);
@@ -1176,6 +1223,10 @@
     const gw = geom(own, wp);
     $("ios-route").textContent = routeActive ? `Harbour run · ${short(wp.name).split(" ")[0]} ${gw.rng.toFixed(1)} nm` : "None active";
     $("ios-route-dot").style.background = routeActive ? "var(--ios-green)" : "var(--ios-muted)";
+    const R = reported();
+    $("ios-hdg").textContent = hdgSrc === "compass" ? `Compass ${three(R.ref)}°` : hdgSrc === "course" ? `Course ${three(R.ref)}°`
+      : R.set ? `Fixed ${three(R.ref)}° (no compass)` : "None, set one in Settings";
+    $("ios-hdg-dot").style.background = hdgSrc === "none" ? (R.set ? "var(--ios-orange)" : "var(--ios-red)") : "var(--ios-green)";
     $("route-out").textContent = routeActive ? `Harbour run · next ${short(wp.name)} ${gw.rng.toFixed(1)} nm` : "Harbour run · not active";
     $("route-toggle").textContent = routeActive ? "Stop navigation" : "Activate route";
     $("clock").textContent = `Sim time ${String(Math.floor(simT / 60)).padStart(2, "0")}:${String(Math.floor(simT % 60)).padStart(2, "0")}`;
@@ -1221,6 +1272,16 @@
   }));
   document.querySelectorAll('input[name="look"]').forEach(r => r.addEventListener("change", e => { lensLook = e.target.value; }));
   $("look-sunset").addEventListener("change", e => { lookAtSunset = e.target.checked; });
+  const HDG_HINT = {
+    compass: "TimeZero sends HDG from a heading sensor. Labels follow the bow as the boat turns.",
+    course: "No compass, but the boat is moving: the app uses course over ground (COG) from the GPS. Close enough under way; it can't tell when the stern swings in a current.",
+    none: "Tied up with no compass, like a boat at the dock: TimeZero sends blank HDG and no course. Without a heading the app can't place anything, so turn on Fixed heading and set the way the bow points (read it off the chart). The lens marks it SET. Set it wrong to see the labels slide off their targets.",
+  };
+  const showHdgHint = () => { $("hdg-hint").textContent = HDG_HINT[hdgSrc]; };
+  document.querySelectorAll('input[name="hdgsrc"]').forEach(r => r.addEventListener("change", e => { hdgSrc = e.target.value; showHdgHint(); }));
+  $("fixed-on").addEventListener("change", e => { fixedOn = e.target.checked; $("fixed-row").hidden = !fixedOn; });
+  $("fixed-hdg").addEventListener("input", e => { fixedHdg = +e.target.value; $("fixed-out").textContent = `Bow points ${fixedHdg}° true`; });
+  showHdgHint();
   document.querySelectorAll('input[name="tod"]').forEach(r => r.addEventListener("change", e => { tod = e.target.value; }));
   document.querySelectorAll('input[name="lensmode"]').forEach(r => r.addEventListener("change", e => {
     lensMode = e.target.value;

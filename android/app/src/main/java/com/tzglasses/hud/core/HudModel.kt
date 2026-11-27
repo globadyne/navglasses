@@ -155,6 +155,8 @@ object HudBuilder {
         footer = footer,
         stale = (snap.rxAgeS ?: 0.0) > 5,
     )
+    // No heading and no course (no compass, not moving): nothing can be placed relative to the bow.
+    if (heading == null) return base.copy(message = "No heading or course from the boat")
     if (gaze == null) return base.copy(message = "Look at the bow and tap to start")
 
     val half = s.fovDeg / 2

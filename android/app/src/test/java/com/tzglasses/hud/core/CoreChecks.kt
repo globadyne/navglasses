@@ -139,6 +139,8 @@ fun runCoreChecks(seed: Long = 1): List<Pair<String, Boolean>> {
   val hidden = HudBuilder.build(snap, 100.0, HudSettings(hiddenSources = setOf("ARPA")))
   check("hiding ARPA removes radar targets", hidden.items.none { it.title == "RIGHT" })
   check("no gaze asks to calibrate", HudBuilder.build(snap, null, HudSettings()).message != null)
+  val noHeading = HudBuilder.build(snap.copy(own = OwnShip(sog = 0.0)), 100.0, HudSettings())
+  check("no heading or course places nothing", noHeading.items.isEmpty() && noHeading.message != null, noHeading.message)
   check("wraps through north", HudBuilder.build(
       BoatSnapshot(own = OwnShip(), targets = listOf(Target(name = "N", rangeNm = 1.0, bearing = 2.0))),
       358.0, HudSettings()).items.single().x == 0.7)
